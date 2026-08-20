@@ -1,0 +1,72 @@
+# ---- 第三方版权素材：绝不提交 ----
+# 参考音频、视频、分离出的 stem
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.aac
+*.ogg
+*.mp4
+*.mkv
+*.mov
+audio/
+stems/
+separated/
+
+# 歌词文件（版权内容）
+*.lrc
+*.srt
+*.ass
+*.vtt
+lyrics/
+
+# SynthV 工程文件（含第三方乐谱数据）
+*.svp
+*.svpk
+
+# ---- 模型权重：体积 + 第三方，靠 scripts/ 重建 ----
+models/
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.dnni
+
+# ---- 本地路径配置：因机而异 ----
+config.local.*
+.env
+.env.*
+!.env.example
+
+# ---- 中间产物 ----
+out/
+output/
+cache/
+*.npz
+*.npy
+eval/reports/*
+!eval/reports/.gitkeep
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- Node ----
+node_modules/
+dist/
+*.log
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/
