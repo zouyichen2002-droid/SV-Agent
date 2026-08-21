@@ -1,0 +1,34 @@
+# 复制为 config.local.toml 后按机器改。config.local.* 已被 .gitignore 排除。
+# 素材路径一律走配置，不进代码 —— 这样基准曲可替换、eval 能跑多首歌。
+
+[paths]
+models   = "E:/SynthV-models"          # 模型权重根目录，靠 scripts/fetch_models 重建
+cache    = "E:/sv-bridge/.cache"        # 中间产物（f0 轨迹等），已被 gitignore
+reports  = "E:/sv-bridge/eval/reports"  # eval 输出
+
+[models]
+zh_ctc = "zh-ctc"          # 相对 paths.models
+rmvpe  = "rmvpe/rmvpe.pt"  # 相对 paths.models
+
+# ---- 基准曲 / 回归用例。可以有多个 [[songs]] ----
+[[songs]]
+id       = "chaosheng"
+title    = "潮声回响"
+bpm      = 86.00
+first_beat_s = 0.240
+# 分离出的 stem
+vocals   = "E:/潮声回响/人声分离/htdemucs/来自塞壬的歌谣，听『潮声回响』【洛天依海洋之心原创曲】/vocals.wav"
+no_vocals= "E:/潮声回响/人声分离/htdemucs/来自塞壬的歌谣，听『潮声回响』【洛天依海洋之心原创曲】/no_vocals.wav"
+lyrics   = "E:/潮声回响/翻唱重制/lyrics.lrc"
+project  = "E:/潮声回响/翻唱重制/潮声回响-86BPM.svp"
+# LRC 前 10 行（2.45–13.11s）在本份 render 里无人声，见 specs/benchmark-facts-chaosheng.md §2
+lyrics_skip_before_s = 20.0
+# 和声（括号）行集中区间，见同文件 §3
+harmony_window_s = [92.85, 151.88]
+
+[pitch]
+sr        = 16000     # 三个估计器的共同采样率
+hop_s     = 0.010     # 共同帧栅格 10ms（三者原生都是 10ms，无需重采样）
+fmin_hz   = 70.0
+fmax_hz   = 900.0
+agree_cents = 50.0    # 「一致」判据：0.5 半音
