@@ -1,5 +1,17 @@
 # SynthV 创作链项目 — 交接文件
 
+> ⚠️ **本文件是 2026-08-20 上一个会话的交接记录，保留作历史。其中若干事实已被接手会话复核修正，以下面三份为准：**
+>
+> - [`specs/benchmark-facts-chaosheng.md`](specs/benchmark-facts-chaosheng.md) — 基准曲事实，逐条标注证据等级。
+>   **§5.2「主唱/和声混在一条 stem 是总闸门」已被推翻**（和声区间内覆盖反而更高）；
+>   §4.1 的「42 演唱行」实际是 52 行，差额 10 行经判定确为无人声。
+> - [`specs/environment-notes.md`](specs/environment-notes.md) — 环境，**三条已过期**：
+>   torchaudio 可与 torch 2.13 共存且 `forced_align` 可用；HuggingFace 现在 56.8MB/s；
+>   新增一条 numpy LAPACK 与 torch OpenMP 冲突会直接 abort。
+> - [`specs/adr/`](specs/adr/) — ADR-0001..0004。§5.5 的验收目标已细化为 `[gates.*]` 配置。
+>
+> §0（协作模式）与 §3（桥的能力边界）仍然有效。
+
 > 交接给下一个 Claude Code 会话。**请先完整读完本文件再动手。**
 > 生成时间：2026-08-20　　上游基础：`SynthVCopilot/synthv-agent-bridge` v0.3.1
 

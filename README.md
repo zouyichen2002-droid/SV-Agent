@@ -25,7 +25,23 @@
 
 ## Status
 
-**Early. Not usable yet.** Design and benchmark definition are complete; implementation has not started. See `HANDOFF.md` for the full engineering context and `specs/adr/` for decision records.
+**Stage 1 of 6 complete and passing its gate.** The cross-estimator pitch evidence
+layer is implemented and measured; note construction and bridge write-back are not.
+
+| Stage | What | Gate | State |
+|---|---|---|---|
+| 0 | Isolate the lead vocal from backing vocals | listening check | **deferred** — measurement showed it is not the bottleneck ([ADR-0002](specs/adr/0002-stage1-before-stage0.md)) |
+| 1 | Cross-estimator pitch evidence | ≥85% pair agreement **and** ≥65% median per-line coverage | **passing** — 87.4% / 70.3% |
+| 2 | Per-line lyric offset | residual < 150 ms per line | not started |
+| 3 | Per-syllable forced alignment | ≥98% aligned without interpolation | prototype validated (95.2%) |
+| 4 | Note construction | 0 overlaps, ≥85 ms, **0 notes without direct acoustic evidence** | not started |
+| 5 | Write back through the MCP runtime | human listening check | not started |
+
+Stage 1 raised usable pitch evidence from 43% to 70.3% of sung frames, and defeated
+the worst documented failure of the previous attempt (a pitch estimator locking onto
+the third sub-harmonic: MIDI 68.90 read as 50.00 — now 69.00, +0.10 semitone).
+
+See `HANDOFF.md` for background and `specs/adr/` for the decision log.
 
 ---
 
