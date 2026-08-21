@@ -32,3 +32,26 @@ hop_s     = 0.010     # 共同帧栅格 10ms（三者原生都是 10ms，无需�
 fmin_hz   = 70.0
 fmax_hz   = 900.0
 agree_cents = 50.0    # 「一致」判据：0.5 半音
+
+# ---- 证据规则（ADR-0004，用户拍板）----
+conf_gate = 0.2       # 各估计器的置信门限
+min_agree = 2         # 共识簇里至少几个估计器
+required  = ["rmvpe"] # 必须参与确认的估计器。理由见 ADR-0004：
+                      # 风险精确集中在「只有 crepe+praat 联署」那 4.8% 的帧
+
+# ---- 阶段门槛（ADR-0004，用户拍板：一致率 + 覆盖率双门槛）----
+[gates.stage1]
+pair_agree_min      = 0.85   # 任意两个独立估计器在共同有声帧上的一致率
+line_coverage_median_min = 0.65  # 演唱行的音高证据覆盖中位
+
+[gates.stage2]
+line_residual_max_s = 0.150  # 逐行 LRC 偏移的残差上限
+
+[gates.stage3]
+direct_align_min = 0.98      # 字级直接对齐率（不含插值）
+
+[gates.stage4]
+min_note_ms   = 85           # 最短音符时长
+max_note_s    = 1.70         # 最长音符时长
+max_overlaps  = 0            # 允许的重叠对数
+fabricated_notes_max = 0     # 无声学证据的音符数上限

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -70,8 +71,12 @@ def compare(a: PitchTrack, b: PitchTrack, tol_cents: float = 50.0) -> PairStats:
 class EvidenceMap:
     """逐帧的音高证据。
 
-    `f0_hz`：只在有证据的帧上有值（取互相确认的估计器的中位），其余 NaM。
+    `f0_hz`：只在有证据的帧上有值（取互相确认的估计器的中位），其余 NaN。
     `n_agree`：该帧有多少个估计器落在共识簇里。
+    `by`：(n_frames, n_estimators) 的布尔表，记**是谁确认的**。
+        保留来源而不是只保留一个布尔"有/无证据"，是因为阶段 4 建音符时
+        不同来源的可信度不同（例如 praat-ac 在本素材上系统性低一个八度），
+        下游要能按来源再筛一次，而不是回来重跑。
     """
     hop_s: float
     f0_hz: np.ndarray
@@ -79,6 +84,18 @@ class EvidenceMap:
     spread_cents: np.ndarray
     sources: list[str] = field(default_factory=list)
     tol_cents: float = 50.0
+    by: np.ndarray | None = None
+
+    def confirmed_by(self, *names: str) -> np.ndarray:
+        """这些估计器**全部**参与确认的帧。"""
+        if self.by is None:
+            raise ValueError("这张证据图没有记录来源")
+        m = self.has_evidence.copy()
+        for nm in names:
+            if nm not in self.sources:
+                raise ValueError(f"来源里没有 {nm!r}，有的是 {self.sources}")
+            m &= self.by[:, self.sources.index(nm)]
+        return m
 
     @property
     def has_evidence(self) -> np.ndarray:
@@ -108,7 +125,8 @@ class EvidenceMap:
 
 def build(tracks: list[PitchTrack], tol_cents: float = 50.0,
           min_agree: int = 2, veto_octave_contest: bool = False,
-          octave_tol_cents: float = 150.0) -> EvidenceMap:
+          octave_tol_cents: float = 150.0,
+          required: Sequence[str] | None = None) -> EvidenceMap:
     """在每一帧上找最大共识簇。
 
     做法：把该帧所有有声估计器的 cents 排序，找一个宽度 ≤ 2*tol 的最大窗口。
@@ -117,23 +135,34 @@ def build(tracks: list[PitchTrack], tol_cents: float = 50.0,
     这样八度错会被自动排除：跟错八度的那个估计器落在簇外，不参与取中位，
     也不会把中位拖到两者之间那个物理上不存在的值。
 
+    `required` 里的估计器**必须**在共识簇内，否则本帧不算证据。
+    《潮声回响》上的实测结论是 `required=["rmvpe"]`（ADR-0004）：
+    风险精确集中在「只有 crepe+praat 联署」那 4.8% 的帧 —— 该批里 rmvpe 有值时
+    79% 与之相差整一个八度。要求 rmvpe 参与，等于精准剔掉这一批，
+    同时保留 praat 有用的部分（praat+rmvpe 一致的 4.2%）。
+
     `veto_octave_contest=True` 时再加一条：**若簇外还有估计器给出的值恰好差
     约一个八度，本帧判为"有争议"，不算证据。**
-
-    为什么需要这条：min_agree=2 的漏洞是两个估计器一起犯同一个八度错。
-    《潮声回响》上实测，praat-ac 在 crepe∩rmvpe 一致的帧里有 64.0% 恰好低一个八度；
-    而"只有 crepe+praat 确认"的帧里，rmvpe 有值时 79% 与之相差整一个八度。
-    那批就是假确认。宁可算作缺口交给耳朵，也不要写一个自信的错音高。
+    实测这条是钝刀（覆盖 69.8%→53.1%，最差行掉到 6.9%）：praat-ac 在 crepe∩rmvpe
+    一致的帧里有 64.0% 恰好低一个八度，所以它在大量否决本来正确的帧。
+    留着这个开关是为了记录这条路走不通，默认关闭。
     """
     n = tracks[0].f0_hz.size
+    names = [t.name for t in tracks]
     for t in tracks:
         if t.f0_hz.size != n:
             raise ValueError(f"轨迹长度不一致: {t.name} {t.f0_hz.size} vs {n}")
+    req_idx: list[int] = []
+    for nm in (required or ()):
+        if nm not in names:
+            raise ValueError(f"required 里的 {nm!r} 不在估计器列表 {names} 中")
+        req_idx.append(names.index(nm))
     C = np.vstack([t.cents for t in tracks])            # (E, N)
     F = np.vstack([t.f0_hz for t in tracks])
     f0 = np.full(n, np.nan)
     n_ag = np.zeros(n, dtype=np.int16)
     spread = np.full(n, np.nan)
+    by = np.zeros((n, len(tracks)), dtype=bool)
     width = 2.0 * tol_cents
 
     for i in range(n):
@@ -155,6 +184,8 @@ def build(tracks: list[PitchTrack], tol_cents: float = 50.0,
         sel = ok & (np.abs(col - centre) <= tol_cents)
         if sel.sum() < min_agree:
             continue
+        if req_idx and not all(sel[k] for k in req_idx):
+            continue
         if veto_octave_contest:
             out = ok & ~sel
             if out.any():
@@ -164,6 +195,6 @@ def build(tracks: list[PitchTrack], tol_cents: float = 50.0,
         f0[i] = float(np.median(F[sel, i]))
         n_ag[i] = int(sel.sum())
         spread[i] = float(cluster.max() - cluster.min())
+        by[i] = sel
 
-    return EvidenceMap(tracks[0].hop_s, f0, n_ag, spread,
-                       [t.name for t in tracks], tol_cents)
+    return EvidenceMap(tracks[0].hop_s, f0, n_ag, spread, names, tol_cents, by)

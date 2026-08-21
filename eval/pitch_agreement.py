@@ -101,8 +101,8 @@ def report(cfg, song, force: bool) -> None:
             row += f"{100*v.mean():13.1f}%"
         print(row)
 
-    print("\n=== 两两一致性（仅两者都判有声的帧，门限 0.3）===")
-    gated = [tr.gated(0.3) for tr in tracks]
+    print(f"\n=== 两两一致性（仅两者都判有声的帧，门限 {P.conf_gate}）===")
+    gated = [tr.gated(P.conf_gate) for tr in tracks]
     for i in range(len(gated)):
         for j in range(i + 1, len(gated)):
             s = evidence.compare(gated[i], gated[j], P.agree_cents)
@@ -127,8 +127,18 @@ def report(cfg, song, force: bool) -> None:
               f" {np.median(sp) if sp.size else float('nan'):12.1f} "
               f"{len(gaps):6d} 处/{sum(b-a for a,b in gaps):.0f}s")
 
-    em = evidence.build([tr.gated(0.3) for tr in tracks], P.agree_cents, min_agree=2)
-    print(f"\n  采用门限 0.3 / ≥2 一致：覆盖 {100*em.coverage():.1f}%")
+    em = evidence.build(gated, P.agree_cents, min_agree=P.min_agree,
+                        required=P.required)
+    print(f"\n  采用规则（ADR-0004）：门限 {P.conf_gate} / ≥{P.min_agree} 一致 / "
+          f"必须含 {list(P.required) or '无'}   →   覆盖 {100*em.coverage():.1f}%")
+    print("  确认来源拆解（占有证据帧）：")
+    tot = max(1, int(em.has_evidence.sum()))
+    for nm in em.sources:
+        k = em.confirmed_by(nm)
+        print(f"    {nm:12s} 参与确认 {int(k.sum()):6d} 帧  {100*k.sum()/tot:5.1f}%")
+    for k in (2, 3):
+        mk = em.has_evidence & (em.n_agree == k)
+        print(f"    恰好 {k} 个确认   {int(mk.sum()):6d} 帧  {100*mk.sum()/tot:5.1f}%")
     gaps = em.gaps(1.0)
     print(f"  >1s 无证据空洞 {len(gaps)} 处，合计 "
           f"{sum(b-a for a,b in gaps):.1f}s（占全曲 {100*sum(b-a for a,b in gaps)/dur:.1f}%）")
@@ -164,7 +174,7 @@ def report(cfg, song, force: bool) -> None:
         i0, i1 = int(a / P.hop_s), int(b / P.hop_s)
         print(f"  {a:6.2f}–{b:6.2f}s  {why}")
         print(f"    参考值 MIDI {ref_midi:.2f}")
-        for tr in [t.gated(0.3) for t in tracks]:
+        for tr in gated:
             f = tr.f0_hz[i0:i1]
             v = np.isfinite(f)
             md = hz_to_midi(np.median(f[v])) if v.any() else float("nan")
@@ -187,6 +197,34 @@ def report(cfg, song, force: bool) -> None:
               f"   区间外 覆盖 {100*em.has_evidence[~ih].mean():5.1f}%")
         print("  交接文件称 stem 混了主唱/和声是「总闸门」。若两者接近，"
               "该说法不成立 —— 见 specs/benchmark-facts-chaosheng.md §3.3")
+
+    # ---- 门槛判定 ----
+    g = cfg.gate("stage1")
+    best_pair = max(
+        (evidence.compare(a, b, P.agree_cents)
+         for a, b in [(gated[i], gated[j])
+                      for i in range(len(gated)) for j in range(i + 1, len(gated))]),
+        key=lambda s: s.agree_rate)
+    line_med = float(np.median(cov))
+    checks = [
+        ("最佳一对独立估计器的一致率",
+         best_pair.agree_rate, g["pair_agree_min"],
+         f"{best_pair.a} vs {best_pair.b}"),
+        ("演唱行音高证据覆盖中位", line_med, g["line_coverage_median_min"], ""),
+    ]
+    print("\n=== 阶段 1 门槛判定（ADR-0004）===")
+    ok_all = True
+    for label, got, need, note in checks:
+        ok = got >= need
+        ok_all &= ok
+        print(f"  {'通过' if ok else '未过'}  {label:<26} 实测 {100*got:5.1f}%  "
+              f"门槛 ≥{100*need:.0f}%  余量 {100*(got-need):+5.1f} 个百分点"
+              f"{('   ' + note) if note else ''}")
+    print(f"\n  阶段 1：{'通过，可进阶段 2（逐行 LRC 偏移）' if ok_all else '未过，停下报告'}")
+    if ok_all:
+        print("  提醒：覆盖中位余量只有 "
+              f"{100*(line_med-g['line_coverage_median_min']):+.1f} 个百分点，很薄。"
+              "换素材后要重跑，不要当作已经稳。")
 
 
 def main() -> int:

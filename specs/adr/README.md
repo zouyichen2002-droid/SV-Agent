@@ -48,4 +48,4 @@
 | [0001](0001-syllable-boundaries-ctc-over-dp.md) | 音节边界用 CTC 强制对齐，放弃 DP 分段与网格量化 | 已接受（仅限"边界定位"这一步） |
 | [0002](0002-stage1-before-stage0.md) | 起手点选阶段 1（音高证据层），不是阶段 0（stem 分离） | 已接受，实测确认 |
 | [0003](0003-rmvpe-frontend-measured-not-assumed.md) | RMVPE 的前向选择与前端参数一律实测确定 | 已接受 |
-| 0004 | 音高证据层用哪几个估计器、门限定多少 | **待用户拍板** |
+| [0004](0004-evidence-rule-and-stage1-gate.md) | 证据规则要求 rmvpe 参与确认；阶段 1 双门槛 | 已接受，阶段 1 已通过 |

@@ -58,6 +58,9 @@ class PitchCfg:
     fmin_hz: float
     fmax_hz: float
     agree_cents: float
+    conf_gate: float = 0.2
+    min_agree: int = 2
+    required: tuple[str, ...] = ()
 
     @property
     def hop_len(self) -> int:
@@ -76,6 +79,12 @@ class Config:
     model_paths: dict[str, Path]
     songs: dict[str, Song]
     pitch: PitchCfg
+    gates: dict[str, dict]
+
+    def gate(self, stage: str) -> dict:
+        if stage not in self.gates:
+            raise ConfigError(f"配置里没有 {stage!r} 的门槛，有的是 {sorted(self.gates)}")
+        return self.gates[stage]
 
     def song(self, song_id: str) -> Song:
         if song_id not in self.songs:
@@ -123,5 +132,10 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         fmin_hz=float(p.get("fmin_hz", 70.0)),
         fmax_hz=float(p.get("fmax_hz", 900.0)),
         agree_cents=float(p.get("agree_cents", 50.0)),
+        conf_gate=float(p.get("conf_gate", 0.2)),
+        min_agree=int(p.get("min_agree", 2)),
+        required=tuple(p.get("required", ())),
     )
-    return Config(src, models_dir, cache_dir, reports_dir, model_paths, songs, pitch)
+    gates = {k: dict(v) for k, v in raw.get("gates", {}).items()}
+    return Config(src, models_dir, cache_dir, reports_dir, model_paths, songs,
+                  pitch, gates)
