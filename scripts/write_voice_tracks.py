@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
 from svchain import config, evidence, notes as N
+from svchain.align import from_stems
 from svchain.audio import cached_track, load_mono
 from svchain.bridge import Bridge, BridgeError, decode_notes
 from svchain.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
@@ -95,6 +96,82 @@ def evidence_for(cfg, path: Path, nf: int):
             print(f"      （{tr.name} 重算）")
         trs.append(tr.gated(P.conf_gate))
     return evidence.build(trs, P.agree_cents, min_agree=2)
+
+
+def mix_support_mask(cfg, mixed: np.ndarray, f0_hz: np.ndarray,
+                     tol_bins: int = 3, abs_thr: float = 0.06):
+    """逐帧判断：这个 f0 在**原始混合信号**的 RMVPE 显著图上有没有局部峰支持。
+
+    这是 ADR-0005 的回代检验，裁判是混合信号本身，不依赖任何分离器的判决。
+    《潮声回响》实测：主唱 stem 支持率 91.4%，**和声 stem 只有 51.7%** ——
+    约一半的和声音高在原始信号里根本没有对应峰，是分离器造出来的。
+    """
+    from svchain.pitch.base import hz_to_cents
+    from svchain.pitch.rmvpe_est import CENTS_BASE, CENTS_PER_BIN
+
+    est = RmvpeEstimator(cfg.model("rmvpe"))
+    est._load()
+    sal = est._salience(est._mel(mixed, cfg.pitch.sr))
+    c = hz_to_cents(f0_hz)
+    ok = np.isfinite(c)
+    b = np.round(np.where(ok, (c - CENTS_BASE) / CENTS_PER_BIN, 0.0)).astype(int)
+    n = min(sal.shape[0], f0_hz.size)
+    out = np.zeros(f0_hz.size, dtype=bool)
+    for i in range(n):
+        if not ok[i]:
+            continue
+        lo = max(0, b[i] - tol_bins)
+        hi = min(sal.shape[1], b[i] + tol_bins + 1)
+        if hi <= lo:
+            continue
+        w = sal[i, lo:hi]
+        if w.max() < abs_thr:
+            continue
+        j = lo + int(np.argmax(w))
+        l = sal[i, j - 1] if j > 0 else 0.0
+        r = sal[i, j + 1] if j + 1 < sal.shape[1] else 0.0
+        if sal[i, j] >= l and sal[i, j] >= r:
+            out[i] = True
+    return out
+
+
+def filter_by_activity(ns: list, act_mask: np.ndarray, hop_s: float,
+                       min_frac: float = 0.2):
+    """只保留与**人声活动**有交集的音符。
+
+    为什么回代检验不够（实测教训）：回代检验问的是「这个音高在混合信号里有没有峰」，
+    器乐渗漏在混合 vocals stem 里是**真实存在的能量**，所以它照样通过。
+    karaoke 模型会把输入里的器乐渗漏路由到 "instrumental"（和声）输出，
+    于是和声轨在 3.22s / 4.11s / 7.00s 这些**已测定无人声**的位置长出音符。
+
+    人声活动掩码用的是 vocals stem 绝对电平 + vocals/no_vocals 能量比，
+    与回代检验是不同信息源，两条一起才能同时排除「不存在的音高」和「不是人声的音高」。
+
+    阈值取 0.2 而不是 0.5：活动掩码在乐句边缘偏保守，要求过半会砍掉真音符
+    （实测主旋律有 16% 的音符在掩码之外，但其中 0 个落在无人声段 —— 那些是边缘效应）。
+    """
+    keep, drop = [], []
+    for nt in ns:
+        i0 = int(round(nt.onset_s / hop_s))
+        i1 = min(int(round((nt.onset_s + nt.duration_s) / hop_s)), act_mask.size)
+        seg = act_mask[i0:i1]
+        frac = float(seg.mean()) if seg.size else 0.0
+        (keep if frac >= min_frac else drop).append(nt)
+    return keep, drop
+
+
+def filter_by_support(ns: list, support: np.ndarray, hop_s: float,
+                      min_frac: float = 0.6):
+    """只保留「跨度内 ≥min_frac 的帧都被原始混合信号支持」的音符。"""
+    keep, drop = [], []
+    for nt in ns:
+        i0 = int(round(nt.onset_s / hop_s))
+        i1 = int(round((nt.onset_s + nt.duration_s) / hop_s))
+        i1 = min(i1, support.size)
+        seg = support[i0:i1]
+        frac = float(seg.mean()) if seg.size else 0.0
+        (keep if frac >= min_frac else drop).append(nt)
+    return keep, drop
 
 
 def audition(built: dict, song, t0: float, t1: float, out: Path) -> None:
@@ -162,6 +239,17 @@ def main() -> int:
     ap.add_argument("--from", dest="t0", type=float, default=None)
     ap.add_argument("--to", dest="t1", type=float, default=None)
     ap.add_argument("--write", action="store_true")
+    ap.add_argument("--expect", default=None,
+                    help="要求当前工程文件名含此子串，防写错工程。"
+                         "默认取配置里 song.project 的文件名主干")
+    ap.add_argument("--no-mix-filter", action="store_true",
+                    help="不对和声做回代过滤（会写入分离器幻觉，只用于对照试听）")
+    ap.add_argument("--no-activity-filter", action="store_true",
+                    help="不做人声活动约束（会写入器乐渗漏，只用于对照）")
+    ap.add_argument("--activity-min", type=float, default=0.2,
+                    help="音符跨度与人声活动掩码的交集下限")
+    ap.add_argument("--support-min", type=float, default=0.6,
+                    help="回代过滤阈值：音符跨度内被原始混合信号支持的帧占比下限")
     a = ap.parse_args()
 
     cfg = config.load()
@@ -182,9 +270,34 @@ def main() -> int:
         print(f"  stem {stems[role].name}")
         em = evidence_for(cfg, stems[role], nf)
         ns, gaps, drop = N.build(em.f0_hz, P.hop_s, t0, t1, n_agree=em.n_agree)
-        built[role] = {"em": em, "notes": ns, "gaps": gaps}
         print("  " + N.summarize(ns, gaps).replace("\n", "\n  "))
         print("  剔除: " + str({k: q for k, q in drop.items() if q}))
+        unfiltered = list(ns)
+        # 两条轨都过人声活动约束：排除「不是人声」的音高（器乐渗漏）
+        if not a.no_activity_filter:
+            nv = load_mono(song.no_vocals, P.sr)
+            act = from_stems(v, nv, P.hop_len, P.hop_s, nf,
+                             rms_db_min=cfg.align.act_rms_db_min,
+                             ratio_db_min=cfg.align.act_ratio_db_min,
+                             close_s=cfg.align.act_close_s,
+                             open_s=cfg.align.act_open_s)
+            ns, off = filter_by_activity(ns, act.mask, P.hop_s, a.activity_min)
+            pre = [x for x in off if x.onset_s < song.lyrics_skip_before_s]
+            print(f"  人声活动约束（与活动掩码交集 ≥{100*a.activity_min:.0f}%）:")
+            print(f"    保留 {len(ns)} / 剔除 {len(off)}"
+                  f"，其中 {len(pre)} 个落在已测定的无人声段（器乐渗漏）")
+        if role == "backing" and not a.no_mix_filter:
+            # 和声必须过回代检验。实测支持率只有 51.7%，不过滤就是写一半幻觉。
+            sup = mix_support_mask(cfg, v, em.f0_hz)
+            ns, dropped = filter_by_support(ns, sup, P.hop_s, a.support_min)
+            print(f"  回代过滤（要求跨度内 ≥{100*a.support_min:.0f}% 的帧被"
+                  f"原始混合信号支持）:")
+            print(f"    保留 {len(ns)} / 剔除 {len(dropped)}"
+                  f"（{100*len(dropped)/max(1,len(unfiltered)):.0f}% 被判为分离器幻觉）")
+            if ns:
+                print("    " + N.summarize(ns, gaps).replace("\n", "\n    "))
+        built[role] = {"em": em, "notes": ns, "gaps": gaps,
+                       "unfiltered": unfiltered}
         print()
 
     if not any(built[r]["notes"] for r, _ in ROLES):
@@ -193,7 +306,11 @@ def main() -> int:
 
     out = Path(__file__).resolve().parents[1] / "out" / f"listen_{a.song}"
     audition(built, song, t0, t1,
-             out / f"07_待写入_{tag}_{t0:.0f}-{t1:.0f}s.wav")
+             out / f"07_待写入_过滤后_{t0:.0f}-{t1:.0f}s.wav")
+    # 再出一版和声不过滤的，让耳朵自己判那批被剔掉的到底像不像和声
+    raw = {r: {"notes": built[r]["unfiltered"]} for r, _ in ROLES}
+    audition(raw, song, t0, t1,
+             out / f"07_待写入_和声未过滤_{t0:.0f}-{t1:.0f}s.wav")
 
     print("\n=== 计划写入 ===")
     plan = []
@@ -202,7 +319,9 @@ def main() -> int:
         if not ns:
             print(f"  {label}: 没有音符，跳过")
             continue
-        name = f"识别_{label}_{tag[:18]}_中性音节"
+        short = "RoFormer" if "roformer" in tag.lower() else "MDX"
+        suffix = "" if (role == "lead" or a.no_mix_filter) else "-已过回代检验"
+        name = f"识别_{label}{suffix}_{short}_中性音节"
         plan.append((name, ns))
         print(f"  新轨「{name}」  {len(ns)} 个音符  "
               f"{note_name(min(n.midi for n in ns))}–"
@@ -223,40 +342,82 @@ def main() -> int:
         info = b.call("sv_query", {"action": "get_project_info"})
         fname = str(info.get("fileName") or info.get("projectFile") or "")
         print(f"  目标工程 {fname}")
-        if "潮声回响-86BPM" not in fname:
-            print("  ⚠ 工程文件名与预期不符，中止")
+        expect = a.expect or (Path(song.project).stem if song.project else "")
+        if expect and expect not in fname:
+            print(f"  ⚠ 当前工程不含预期子串 {expect!r}，中止（交接文件 §9.6：别写错工程）")
+            print(f"     要写当前这份就加 --expect {Path(fname).stem}")
             return 3
+        print(f"  工程校验通过（要求含 {expect!r}）")
         to_blicks = blick_map(b)
 
         for name, ns in plan:
-            ctx = b.call("sv_query", {"action": "list_tracks",
-                                      "contextMode": "writeIntent"})
-            cid = ctx.get("contextId")
-            n_before = len(ctx.get("tracks") or [])
-            b.call("sv_command", {"action": "add_track", "args": {"name": name},
-                                 "contextId": cid})
-            after = b.call("sv_query", {"action": "list_tracks",
-                                        "contextMode": "writeIntent"})
-            cid = after.get("contextId", cid)
+            before = b.call("sv_query", {"action": "list_tracks"})
+            n_before = len(before.get("tracks") or [])
+            # add_track 不需要 contextId：新建轨道没有既存对象要守卫。
+            # 注意不能传 contextId=None —— schema 要 string，传 null 会被校验拒绝。
+            b.call("sv_command", {"action": "add_track", "args": {"name": name}})
+            after = b.call("sv_query", {"action": "list_tracks"})
             tracks = after.get("tracks") or []
             idx = next((i + 1 for i, t in enumerate(tracks)
                         if str(t.get("name")) == name), len(tracks))
             print(f"\n  建轨「{name}」 → 轨 {idx}（原有 {n_before} 条）")
-            payload = [{"onset": to_blicks(n.onset_s),
+
+            # contextId 绑定在**组**的作用域上，藏在 get_track_notes(writeIntent)
+            # 的 groups[i] 里，不在顶层。上游 issue-8 文档：没有 contextId 也没有
+            # 显式 fingerprint 时，写入会 fail-closed 被拒。
+            gi = 1
+            wr = b.call("sv_query", {"action": "get_track_notes",
+                                     "args": {"trackIndex": idx},
+                                     "contextMode": "writeIntent"})
+            grp = (wr.get("groups") or [{}])[0]
+            cid = grp.get("contextId")
+            g_onset = int(grp.get("onset") or 0)
+            if not isinstance(cid, str) or not cid:
+                print(f"    ✗ 没拿到组的 contextId，跳过（groups[0] 键: "
+                      f"{sorted(grp)}）")
+                continue
+            print(f"    contextId {cid}   组起点 {g_onset} blicks")
+
+            payload = [{"onset": to_blicks(n.onset_s) - g_onset,
                         "duration": max(1, to_blicks(n.onset_s + n.duration_s)
                                         - to_blicks(n.onset_s)),
                         "pitch": int(n.midi), "lyrics": n.lyric} for n in ns]
+            bad = [p for p in payload if p["onset"] < 0]
+            if bad:
+                print(f"    ✗ {len(bad)} 个音符的组内起点为负，跳过本轨")
+                continue
+            ok = 0
             for k in range(0, len(payload), BATCH):
                 chunk = payload[k:k + BATCH]
+                # 每批前重取 contextId：上游明确一个 contextId 的复用有边界，
+                # 会话或目标变化后失效，旧值不得自动重试。
+                if k:
+                    wr = b.call("sv_query", {"action": "get_track_notes",
+                                             "args": {"trackIndex": idx},
+                                             "contextMode": "writeIntent"})
+                    cid = ((wr.get("groups") or [{}])[0]).get("contextId") or cid
                 r = b.call("sv_command", {
                     "action": "add_notes",
-                    "args": {"trackIndex": idx, "groupIndex": 1, "notes": chunk},
+                    # grouping 默认是 ensureNonMain —— 那会让**每一批**都新建一个
+                    # 音符组（实测 6 批变成 6 个组，main 组反而是空的）。
+                    # 用 target 写进指定组，全部音符落在同一个主组里。
+                    "args": {"trackIndex": idx, "groupIndex": gi,
+                             "grouping": "target", "notes": chunk},
                     "contextId": cid})
+                ok += len(chunk)
                 print(f"    批 {k//BATCH+1}/{(len(payload)+BATCH-1)//BATCH}: "
                       f"{len(chunk)} 个  verified={r.get('verified')}")
+            # get_track_notes 把音符放在 groups[].notes 里，不在顶层；
+            # 且 noteCount 是真实总数，notes 受 noteLimit 分页限制。
             chk = b.call("sv_query", {"action": "get_track_notes",
-                                      "args": {"trackIndex": idx}})
-            print(f"    回读 {len(decode_notes(chk))} 个（期望 {len(ns)}）")
+                                      "args": {"trackIndex": idx,
+                                               "noteLimit": 512}})
+            groups = chk.get("groups") or []
+            total = sum(int(g.get("noteCount") or 0) for g in groups)
+            ret = sum(len(decode_notes(g)) for g in groups)
+            print(f"    回读 noteCount={total}（已发 {ok}，期望 {len(ns)}）"
+                  f"  组数 {chk.get('groupCount')}  本次返回 {ret} 个明细"
+                  + ("" if total == len(ns) else "  ⚠ 与期望不符"))
 
     print("\n" + "=" * 62)
     print("需要你手动做的两件事（桥做不到）：")
