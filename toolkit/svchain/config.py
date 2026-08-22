@@ -71,6 +71,18 @@ class PitchCfg:
 
 
 @dataclass(frozen=True)
+class AlignCfg:
+    act_rms_db_min: float = -23.0
+    act_ratio_db_min: float = 2.0
+    act_close_s: float = 0.25
+    act_open_s: float = 0.08
+    max_shift_s: float = 0.60
+    prior_w: float = 0.10
+    margin_s: float = 0.40
+    decisive_plateau_s: float = 0.30
+
+
+@dataclass(frozen=True)
 class Config:
     source: Path
     models_dir: Path
@@ -79,6 +91,7 @@ class Config:
     model_paths: dict[str, Path]
     songs: dict[str, Song]
     pitch: PitchCfg
+    align: AlignCfg
     gates: dict[str, dict]
 
     def gate(self, stage: str) -> dict:
@@ -136,6 +149,9 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
         min_agree=int(p.get("min_agree", 2)),
         required=tuple(p.get("required", ())),
     )
+    a = raw.get("align", {})
+    align = AlignCfg(**{k: v for k, v in a.items()
+                        if k in AlignCfg.__dataclass_fields__})
     gates = {k: dict(v) for k, v in raw.get("gates", {}).items()}
     return Config(src, models_dir, cache_dir, reports_dir, model_paths, songs,
-                  pitch, gates)
+                  pitch, align, gates)
