@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
 from svchain import config, lyrics
+from svchain.align import stage2
 from svchain.align.activity import from_stems
-from svchain.align.line_offset import estimate_offsets, estimate_rate
 from svchain.audio import load_mono
 from svchain.pitch import n_frames_for
 
@@ -58,22 +58,20 @@ def report(cfg, song) -> None:
               f"活动 {L.sum():6.1f}s  段长中位 {np.median(L):4.2f}s  "
               f"在唱锚点 {100*s.mean():5.1f}%  无唱锚点 {100*ns.mean():4.1f}%{mark}")
     A = cfg.align
-    act = from_stems(v, nv, P.hop_len, P.hop_s, nf,
-                     rms_db_min=A.act_rms_db_min, ratio_db_min=A.act_ratio_db_min,
-                     close_s=A.act_close_s, open_s=A.act_open_s)
+    # 与 scripts/make_listening_checks.py 走同一条装配，避免两个入口各自拼出
+    # 不同的速率与全局偏移（曾经真的发生过：0.340 vs 0.360、+0.070 vs +0.020）
+    st2 = stage2(cfg, song)
+    act, rate, gd = st2.activity, st2.rate_s_per_char, st2.global_delta_s
     n_char_all = sum(l.n_chars for l in lines)
 
-    rate, _ = estimate_rate(lines, act)
     print(f"\n=== 演唱速率 ===")
     print(f"  实测 {rate:.3f} s/字 = {1/rate:.2f} 字/秒")
     print(f"  一致性检查：{n_char_all} 字 × {rate:.3f} = "
           f"{n_char_all*rate:.1f}s 名义演唱时长，实测活动 "
           f"{act.mask.sum()*P.hop_s:.1f}s（主唱与和声有时间重叠，实测应偏小）")
 
-    offs, rate, gd = estimate_offsets(
-        lines, act, rate=rate, max_shift_s=A.max_shift_s, margin_s=A.margin_s,
-        prior_w=A.prior_w, decisive_plateau_s=A.decisive_plateau_s)
-    m = [o for o in offs if not o.line.is_harmony]
+    offs = st2.offsets
+    m = st2.main_offsets
     dec = np.array([o.decisive for o in m])
     d = np.array([o.delta_s for o in m])
     pl = np.array([o.plateau_s for o in m])
