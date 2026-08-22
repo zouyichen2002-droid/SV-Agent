@@ -63,10 +63,12 @@ def find_stems(song_id: str) -> dict[str, dict[str, Path]]:
         got: dict[str, Path] = {}
         for f in d.glob("*.wav"):
             n = f.name.lower()
-            if "vocals" in n:
-                got["lead"] = f
-            elif "instrumental" in n:
+            # 输出名形如 vocals_(Instrumental)_<model>.wav —— 里面**也含 "vocals"**。
+            # 按带括号的标记匹配，且先判 instrumental，否则两个文件都会命中 lead。
+            if "(instrumental)" in n:
                 got["backing"] = f
+            elif "(vocals)" in n:
+                got["lead"] = f
         if len(got) == 2:
             out[d.name] = got
     return out
@@ -99,7 +101,9 @@ def peak_support(sal: np.ndarray, f0: np.ndarray, tol_bins: int = 3,
     ok = np.isfinite(c)
     if not ok.any():
         return float("nan"), 0
-    b = np.round((c - CENTS_BASE) / CENTS_PER_BIN).astype(int)
+    # 先填掉 NaN 再取整：NaN→int 是未定义行为，会得到极大/负的下标。
+    # 这些位置后面被 ok 掩码挡掉了，但不能靠"反正用不到"来写。
+    b = np.round(np.where(ok, (c - CENTS_BASE) / CENTS_PER_BIN, 0.0)).astype(int)
     n = min(sal.shape[0], f0.size)
     hit = 0
     tot = 0

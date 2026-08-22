@@ -78,10 +78,12 @@ def main() -> int:
         lead = backing = None
         for f in d.glob("*.wav"):
             n = f.name.lower()
-            if "vocals" in n:
-                lead = f
-            elif "instrumental" in n:
+            # 注意顺序：输出名形如 vocals_(Instrumental)_<model>.wav，
+            # 里面**也含 "vocals"**。必须按带括号的标记匹配，且先判 instrumental。
+            if "(instrumental)" in n:
                 backing = f
+            elif "(vocals)" in n:
+                lead = f
         if not (lead and backing):
             print(f"=== {d.name} === 缺 stem，跳过（找到 {[f.name for f in d.glob('*.wav')]}）")
             continue
@@ -91,13 +93,15 @@ def main() -> int:
         n = min(mix.size, L.size, B.size)
         print(f"  主唱 {rms_db(L[:n]):6.1f}dB   和声 {rms_db(B[:n]):6.1f}dB   "
               f"差 {rms_db(L[:n])-rms_db(B[:n]):+.1f}dB")
-        # 残差检查：主唱+和声 是否约等于原始（分离器有没有丢能量）
+        # 重构残差：主唱+和声 与原始的差。
+        # **不要**把它当"分离质量"来读：RoFormer 这类直接估计目标波形的模型
+        # 本来就不保证两条 stem 加起来等于输入（掩码型才近似保证）。
+        # 它只回答一件事：有多少能量既不在主唱也不在和声里。
         resid = mix[:n] - (L[:n] + B[:n])
-        print(f"  重构残差 {rms_db(resid):6.1f}dB"
-              f"（相对原始 {rms_db(resid)-rms_db(mix[:n]):+.1f}dB）"
-              + ("  ← 残差很小，两条 stem 基本是原始的完整分解"
-                 if rms_db(resid) - rms_db(mix[:n]) < -20 else
-                 "  ← 残差偏大，有能量既不在主唱也不在和声里"))
+        rel = rms_db(resid) - rms_db(mix[:n])
+        print(f"  重构残差 {rms_db(resid):6.1f}dB（相对原始 {rel:+.1f}dB，"
+              f"约 {100*10**(rel/10):.1f}% 的能量）")
+        print("    这类模型不保证可加性，此数只用于横向比较两个模型，不作质量判据")
 
         mn, Ln, Bn = norm(mix[:n]), norm(L[:n]), norm(B[:n])
         od = out_root / d.name
@@ -110,6 +114,9 @@ def main() -> int:
                 continue
             write(od / f"热点_{t0:.0f}-{t1:.0f}s_主唱L_和声R.wav",
                   Ln[i0:i1], Bn[i0:i1])
+            # 关键那条也要出短片段：右边的和声在左边的原始里听不听得到
+            write(od / f"热点_{t0:.0f}-{t1:.0f}s_原始L_和声R.wav",
+                  mn[i0:i1], Bn[i0:i1])
         print()
 
     print(f"全部写在 {out_root}")
