@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | **已接受**，阶段 1 已判定通过 |
+| 状态 | **已接受但待重审**（多声部重定义后，见 [ADR-0005](0005-polyphonic-vocal-transcription.md)）|
 | 日期 | 2026-08-20 |
 | 决策者 | 用户拍板（两问，选项与实测数据由实现方给出） |
 | 影响范围 | `toolkit/svchain/evidence.py`、`config.*.toml` 的 `[pitch]` 与 `[gates.stage1]` |
