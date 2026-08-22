@@ -49,3 +49,4 @@
 | [0002](0002-stage1-before-stage0.md) | 起手点选阶段 1（音高证据层），不是阶段 0（stem 分离） | **已被取代 → 0005** |
 | [0003](0003-rmvpe-frontend-measured-not-assumed.md) | RMVPE 的前向选择与前端参数一律实测确定 | 已接受 |
 | [0004](0004-evidence-rule-and-stage1-gate.md) | 证据规则要求 rmvpe 参与确认；阶段 1 双门槛 | 已接受**待重审**（见 0005）|
+| [0006](0006-line1-paused-gates-insufficient.md) | 线 1 暂停；量化门槛全过而人耳判否，门槛集合不足 | 已接受 |
