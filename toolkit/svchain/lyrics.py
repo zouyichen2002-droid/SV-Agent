@@ -11,8 +11,24 @@ from pathlib import Path
 
 _TS = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
 _HAN = re.compile(r"[一-鿿]")
-# 形如 "ti:" "Vocal:" "作曲 :" 的元数据行
-_META = re.compile(r"^[A-Za-z][A-Za-z ./&]*[:：]")
+
+# 制作名单行。判据是「行首 1–8 个非冒号字符后紧跟冒号」，中英文都要认。
+#
+# 第一版只写了 `^[A-Za-z][A-Za-z ./&]*[:：]`，只认拉丁字母开头，
+# 于是《潮声回响》前 10 行的中文名单全部漏过，被当成演唱行：
+#   作词 ：大九_LN / 作曲 ：李建衡 / 编曲 ：… / 制作人 ：… / 吉他：RK
+#   和声 ：刘潇阳 李建衡 罗文 / 调声 ：… / 混音/母带 ：… / 监制 ：… / 策划 ：…
+# 结果演唱行数是 52 而非 42。声学侧当时已经测出那 10 行（2.45–13.11s）没有人声，
+# 但把原因记成「未解释」—— 真因就是它们不是唱的。
+#
+# 注意 `和声 ：刘潇阳 李建衡 罗文` 这行：它含「和声」二字但不是和声演唱行，
+# 名单判定必须先于和声判定。
+_META = re.compile(r"^[^:：\s]{1,8}\s*[:：]")
+
+# 行尾混入的分类标签之类的杂物。《潮声回响》最后一行是
+# 「在真实中 光与影都自由 计算机与视频游戏」，尾部 8 个字是分类标签，
+# 不剔掉会把该行字数从 10 记成 18。
+_TRAILING_JUNK = ("计算机与视频游戏",)
 
 
 @dataclass(frozen=True)
@@ -48,8 +64,14 @@ def parse(path: str | Path, skip_before_s: float = 0.0) -> list[LyricLine]:
             continue
         t = int(m.group(1)) * 60 + float(m.group(2))
         text = _TS.sub("", s).strip()
+        # 名单判定必须在和声判定之前：`和声 ：刘潇阳 …` 含「和声」但不是演唱行
+        if _META.match(text):
+            continue
+        for junk in _TRAILING_JUNK:
+            if text.endswith(junk):
+                text = text[: -len(junk)].rstrip()
         han = tuple(_HAN.findall(text))
-        if not han or _META.match(text):
+        if not han:
             continue
         if t < skip_before_s:
             continue

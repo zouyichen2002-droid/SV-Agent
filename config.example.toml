@@ -21,8 +21,10 @@ vocals   = "E:/潮声回响/人声分离/htdemucs/来自塞壬的歌谣，听『
 no_vocals= "E:/潮声回响/人声分离/htdemucs/来自塞壬的歌谣，听『潮声回响』【洛天依海洋之心原创曲】/no_vocals.wav"
 lyrics   = "E:/潮声回响/翻唱重制/lyrics.lrc"
 project  = "E:/潮声回响/翻唱重制/潮声回响-86BPM.svp"
-# LRC 前 10 行（2.45–13.11s）在本份 render 里无人声，见 specs/benchmark-facts-chaosheng.md §2
-lyrics_skip_before_s = 20.0
+# 前 10 行是制作名单（作词/作曲/…），已由解析器的元数据判据正确剔除，
+# 不再需要靠时间截断。保留此项为 0，换素材遇到 render 与 LRC 不同版本时可用。
+# 见 specs/benchmark-facts-chaosheng.md §2
+lyrics_skip_before_s = 0.0
 # 和声（括号）行集中区间，见同文件 §3
 harmony_window_s = [92.85, 151.88]
 
