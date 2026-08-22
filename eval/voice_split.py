@@ -122,6 +122,54 @@ def peak_support(sal: np.ndarray, f0: np.ndarray, tol_bins: int = 3,
     return (hit / tot if tot else float("nan")), tot
 
 
+def multipeak_rate(est: RmvpeEstimator, path: Path, sr: int, sung: np.ndarray,
+                   abs_thr: float = 0.10, rel_thr: float = 0.25,
+                   min_sep_bins: int = 5) -> tuple[float, float]:
+    """这条 stem 自己还剩多少复音？返回 (≥2 峰占演唱帧比例, 峰数均值)。
+
+    用途：用户要的是「1 条主旋律 + **多个**和声轨」。karaoke 模型只给
+    主唱/和声两条，若和声 stem 自己仍是多声部（三声和声很常见），
+    单声部 f0 照样不够，需要再拆或上多音高。
+
+    注意 RMVPE 在单声部上训练，这个比例是**被压低的下界**（见 ADR-0005）。
+    它的用法是**比较**：和声 stem 的多峰率若显著高于主唱 stem，就说明还没拆干净。
+    """
+    y = load_mono(path, sr)
+    sal = est._salience(est._mel(y, sr))
+    n = min(sal.shape[0], sung.size)
+    sal, m = sal[:n], sung[:n]
+    idx, _ = find_peaks_simple(sal, abs_thr, rel_thr, min_sep_bins)
+    npk = (idx >= 0).sum(axis=1)
+    if not m.any():
+        return float("nan"), float("nan")
+    return float((npk[m] >= 2).mean()), float(npk[m].mean())
+
+
+def find_peaks_simple(sal: np.ndarray, abs_thr: float, rel_thr: float,
+                      min_sep: int, max_peaks: int = 4):
+    n_f = sal.shape[0]
+    out = np.full((n_f, max_peaks), -1, dtype=np.int16)
+    left, mid, right = sal[:, :-2], sal[:, 1:-1], sal[:, 2:]
+    is_pk = (mid >= left) & (mid > right) & (mid >= abs_thr)
+    for i in range(n_f):
+        cand = np.flatnonzero(is_pk[i]) + 1
+        if cand.size == 0:
+            continue
+        v = sal[i, cand]
+        keep = v >= max(abs_thr, rel_thr * float(v.max()))
+        cand, v = cand[keep], v[keep]
+        picked: list[int] = []
+        for k in np.argsort(v)[::-1]:
+            b = int(cand[k])
+            if all(abs(b - p) >= min_sep for p in picked):
+                picked.append(b)
+            if len(picked) == max_peaks:
+                break
+        for j, b in enumerate(picked):
+            out[i, j] = b
+    return out, None
+
+
 def report(cfg, song) -> None:
     P = cfg.pitch
     stems = find_stems(song.id)
@@ -158,6 +206,18 @@ def report(cfg, song) -> None:
             print(f"  {role:8s} 整体电平 {e_db:6.1f}dB  "
                   f"两估计器一致覆盖 {100*em.coverage():5.1f}%  "
                   f"演唱帧内 {100*cov_sung:5.1f}%")
+        print("  各 stem 自身残余复音（RMVPE 多峰率，是被压低的下界，只作比较用）:")
+        base_r, base_n = multipeak_rate(est, Path(song.vocals), P.sr, sung)
+        print(f"    {'原始混合':8s} ≥2峰 {100*base_r:5.1f}%   峰数均值 {base_n:.2f}")
+        for role in ("lead", "backing"):
+            r, nm = multipeak_rate(est, paths[role], P.sr, sung)
+            flag = ""
+            if r > base_r * 0.8:
+                flag = "   ← 与原始混合接近，这条 stem 没怎么拆干净"
+            print(f"    {role:8s} ≥2峰 {100*r:5.1f}%   峰数均值 {nm:.2f}{flag}")
+        print("    和声 stem 的多峰率若明显高于主唱，说明它自己还是多声部，"
+              "要「多个和声轨」还得再拆")
+
         lead_em = res[tag]["lead"][1]
         back_em = res[tag]["backing"][1]
         both = lead_em.has_evidence[:nf] & back_em.has_evidence[:nf] & sung

@@ -36,6 +36,36 @@ DEFAULT_MODELS = [
 ]
 
 
+def patch_librosa_get_duration() -> str:
+    """audio-separator 0.44.5 用了 librosa 已删除的 `get_duration(filename=...)`。
+
+    librosa 0.10 把该参数改名为 `path`，1.0.0 里 `filename` 直接不存在，
+    于是**推理全部跑完之后**在写文件那一步炸掉（common_separator.py:292）。
+
+    处理方式的取舍：
+    - 降 librosa —— 不行，整条管线（RMVPE 前端、activity、音符构建）都依赖 1.0.0
+    - 改 site-packages 里的第三方文件 —— 能修但重装就没了，且不留痕迹
+    - **在自己进程里包一层 shim** —— 只影响本进程，可见、可撤、不动别人的文件
+
+    选第三个。
+    """
+    import librosa
+
+    orig = librosa.get_duration
+    if getattr(orig, "_svchain_shim", False):
+        return "已打过"
+
+    def shim(*a, **kw):
+        if "filename" in kw:
+            kw["path"] = kw.pop("filename")
+        return orig(*a, **kw)
+
+    shim._svchain_shim = True
+    librosa.get_duration = shim
+    # audio_separator 里是 `import librosa` 后按属性访问，改模块属性即可生效
+    return "已注入"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--song", default="chaosheng")
@@ -43,6 +73,7 @@ def main() -> int:
     ap.add_argument("--list", action="store_true")
     a = ap.parse_args()
 
+    print(f"librosa.get_duration 兼容 shim: {patch_librosa_get_duration()}")
     from audio_separator.separator import Separator
 
     cfg = config.load()

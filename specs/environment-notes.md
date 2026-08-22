@@ -1,7 +1,7 @@
 # 环境实测记录
 
-> 交接文件 §2 记的环境事实，接手会话逐条复核。**有三条已经过期或不准确**，
-> 以本文件为准。复核日期 2026-08-20。
+> 交接文件 §2 记的环境事实，接手会话逐条复核，并追加本会话新踩到的坑。
+> 以本文件为准。首次复核 2026-08-20，最近更新 2026-08-22。
 
 ## 1. 已复核一致
 
@@ -16,7 +16,7 @@
 | 已装技能 | `synthv-agent` / `synthv-tuning` / `lyric-writing` / `composition-arrangement` |
 | MCP 注册 | `E:\潮声回响\.mcp.json` → `node E:/SV_MCP/dist/src/cli.js` |
 
-## 2. 已过期 / 需修正的三条
+## 2. 已过期 / 需修正 / 新增的坑
 
 ### 2.1 「不要装 torchaudio」这条约束不成立
 
@@ -70,6 +70,37 @@ OMP: Error #15: Initializing libomp.dll, but found libiomp5md.dll already initia
 "may cause crashes or silently produce incorrect results" —— 本项目的整条方法论
 就是防静默错误，不能在地基上开这个口子。`OMP_NUM_THREADS=1` 也不管用（实测无效）。
 
+### 2.4 audio-separator 0.44.5 与 librosa 1.0.0 不兼容
+
+`audio_separator/separator/common_separator.py:292` 调用
+`librosa.get_duration(filename=...)`。librosa 0.10 把该参数改名为 `path`，
+1.0.0 里 `filename` 已不存在。
+
+**失败位置很坑**：它在**推理全部跑完之后**的写文件那一步才炸，
+所以会白跑一遍完整推理（本机 RoFormer + MDX 两个模型合计 40s，长曲目会更痛）。
+
+三个选项与取舍：
+
+| 做法 | 为什么不选 / 选 |
+|---|---|
+| 降 librosa | 不行。RMVPE 前端、activity、音符构建全依赖 1.0.0 |
+| 改 site-packages 里的第三方文件 | 能修，但重装就没了，且不留痕迹 |
+| **在自己进程里包一层 shim** | **选这个**。只影响本进程、可见、可撤、不动别人的文件 |
+
+实现见 `scripts/separate_voices.py:patch_librosa_get_duration()`。
+
+### 2.5 basic-pitch 在 Python 3.13 上装不上
+
+构建链用了 3.12 已移除的 `pkgutil.ImpImporter`：
+
+```
+AttributeError: module 'pkgutil' has no attribute 'ImpImporter'
+```
+
+`--only-binary :all:` 也解不开依赖（ResolutionImpossible）。0.4.0 及以下全部如此。
+替代方案见 ADR-0005（回代检验）。若一定要用，可仿 ADR-0003 对 RMVPE 的做法：
+拿它的 ONNX 权重自己写推理。
+
 ## 3. 本次新装的包
 
 | 包 | 版本 | 用途 |
@@ -79,8 +110,12 @@ OMP: Error #15: Initializing libomp.dll, but found libiomp5md.dll already initia
 | `pypinyin` | 0.55.0 | OOV 字的同音回退（阶段 3 用，尚未接入） |
 | `torchaudio` | 2.11.0 | torchcrepe 的依赖，被动装上，见 §2.1 |
 | `resampy` | 0.4.3 | torchcrepe 的依赖 |
+| `audio-separator` | 0.44.5 | 主唱/和声分离（ADR-0005），需 §2.4 的 shim |
+| `audioread` | — | audio-separator 的隐式依赖，不装它 import 就失败 |
+| `onnxruntime` | 1.29.0 | audio-separator 跑 ONNX 模型 |
+| `torchvision` | 0.28.0 | audio-separator → onnx2torch 的依赖，被动装上 |
 
-`audio-separator` **未装** —— 阶段 0 才需要，见 ADR-0002。
+装 `audio-separator[cpu]` **没有降级 torch**（2.13.0 保留）。
 
 ## 4. 模型清单
 
@@ -89,6 +124,8 @@ OMP: Error #15: Initializing libomp.dll, but found libiomp5md.dll already initia
 | 中文 CTC | `E:\SynthV-models\zh-ctc\pytorch_model.bin` | 1,276,296,151 | `de031fd4b29e0c0667e5346450fadfe1326c89936b888b59c4ede608db763ee4` |
 | RMVPE | `E:\SynthV-models\rmvpe\rmvpe.pt` | 181,184,272 | `6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193` |
 | CREPE full | torchcrepe 包内 | ~85MB | 随包分发 |
+| karaoke 分离 · RoFormer | `separator/mel_band_roformer_karaoke_gabox.ckpt` | 913,026,650 | 由 audio-separator 下载并校验 |
+| karaoke 分离 · MDX-Net | `separator/UVR_MDXNET_KARA_2.onnx` | — | 同上 |
 
 RMVPE 来源：`https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/rmvpe.pt`
 
