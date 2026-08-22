@@ -34,11 +34,11 @@ from svchain import config
 from svchain.align import stage1, stage2
 
 SR_OUT = 44100
-EXCERPTS = [
-    ("trap_139.9s_应为MIDI69", 137.5, 143.0),
-    ("fail_L03_40.5s_残差340ms", 38.0, 45.0),
-    ("fail_L35_164.8s_残差460ms", 162.0, 170.5),
+# 固定抽查点：交接文件明确记过的断言
+FIXED_EXCERPTS = [
+    ("trap_139.9s_证据层给MIDI69.00_pyin曾报50.00", 137.5, 143.0),
 ]
+# 超线行的片段在运行时按实测生成，避免文件名里的数字过期
 
 
 def upsample_hold(x: np.ndarray, hop_s: float, n_out: int, sr: int) -> np.ndarray:
@@ -82,6 +82,10 @@ def clicks(times_s: list[float], n_out: int, sr: int, freq: float = 2000.0,
         if 0 <= i < n_out - n:
             out[i:i + n] += burst
     return (out * (10 ** (level_db / 20))).astype(np.float32)
+
+
+def o_res(o) -> float:
+    return o.onset_residual_s
 
 
 def write_stereo(path: Path, left: np.ndarray, right: np.ndarray, sr: int) -> None:
@@ -137,10 +141,19 @@ def main() -> int:
     # --- 定点抽查 ---
     print("\n定点抽查片段：")
     ex_dir = out_dir / "04_定点抽查"
-    for name, t0, t1 in EXCERPTS:
-        i0, i1 = int(t0 * SR_OUT), int(t1 * SR_OUT)
-        i1 = min(i1, n_out)
-        write_stereo(ex_dir / f"{name}.wav", ref[i0:i1], tone[i0:i1], SR_OUT)
+    need = float(cfg.gate("stage2")["line_residual_max_s"])
+    excerpts = list(FIXED_EXCERPTS)
+    for o in sorted((x for x in mains if x.judgeable and o_res(x) > need),
+                    key=lambda x: -o_res(x)):
+        excerpts.append((
+            f"超线_L{o.line.index:02d}_{o.line.t_s:.1f}s"
+            f"_残差{o_res(o)*1000:.0f}ms",
+            max(0.0, o.line.t_s - 2.5), o.line.t_s + o.box_len_s + 2.5))
+    for name, t0, t1 in excerpts:
+        i0, i1 = int(t0 * SR_OUT), min(int(t1 * SR_OUT), n_out)
+        # 抽查片段右声道同时给音高正弦和起点 click，两件事一起听
+        r = tone[i0:i1].astype(np.float64) + (hi + lo)[i0:i1].astype(np.float64)
+        write_stereo(ex_dir / f"{name}.wav", ref[i0:i1], r, SR_OUT)
 
     print(f"\n全部写在 {out_dir}")
     print("out/ 已被 .gitignore 排除，不会进库。")
