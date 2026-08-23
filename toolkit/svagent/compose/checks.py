@@ -145,8 +145,12 @@ class ProsodyCfg:
 
 @dataclass
 class CheckCfg:
-    range_lo: int = 57                     # A3，**占位值，必须由创作者给准**
-    range_hi: int = 76                     # E5，同上
+    # 星尘（五维介质·星尘）的舒适音域，创作者给的是「A2–F#4」。
+    # **他用的是 A2 = MIDI 57 的记法**，比「中央C = C4」惯例低一个八度。
+    # 交叉验证：他自己写/改过的轨1（174 音符）实测音域恰好是 MIDI 57–78，
+    # 跨度 21 半音，与「A2–F#4」的 21 半音严丝合缝。所以是 57–78 而不是 45–66。
+    range_lo: int = 57                     # 他记作 A2；C4惯例下是 A3，220.0Hz
+    range_hi: int = 78                     # 他记作 F#4；C4惯例下是 F#5，740.0Hz
     range_edge_semitones: int = 2          # 距边界这么近就提醒
     leap_max_semitones: int = 9            # 大六度
     scale_in_key_min: float = 0.90

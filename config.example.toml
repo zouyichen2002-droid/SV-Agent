@@ -74,3 +74,14 @@ min_note_ms   = 85           # 最短音符时长
 max_note_s    = 1.70         # 最长音符时长
 max_overlaps  = 0            # 允许的重叠对数
 fabricated_notes_max = 0     # 无声学证据的音符数上限
+
+# ---- 声库能力。创作线的硬约束，见 toolkit/svagent/compose/checks.py ----
+[voice.stardust]
+display_name = "五维介质·星尘"
+# 创作者给的是「A2–F#4」，他用 A2 = MIDI 57 的记法（比中央C=C4 惯例低一个八度）。
+# 交叉验证：他自己的轨1 实测 MIDI 57–78，跨度 21 半音，与 A2–F#4 吻合。
+midi_lo = 57
+midi_hi = 78
+bpm_lo = 60      # 擅长速度下限
+bpm_hi = 170     # 擅长速度上限
+language = "mandarin"
