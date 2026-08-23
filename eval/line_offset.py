@@ -21,11 +21,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, lyrics
-from svchain.align import stage2
-from svchain.align.activity import from_stems
-from svchain.audio import load_mono
-from svchain.pitch import n_frames_for
+from svagent import config, lyrics
+from svagent.align import stage2
+from svagent.align.activity import from_stems
+from svagent.audio import load_mono
+from svagent.pitch import n_frames_for
 
 # 带标签锚点，用于回报检测器在本次运行下的表现（用于挑阈值的那批，见 activity.py）
 SING = [(23.54, 28.60), (35.25, 40.30), (58.28, 63.00), (85.61, 88.30),

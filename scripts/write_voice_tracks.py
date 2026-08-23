@@ -44,11 +44,11 @@ import soundfile as sf
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, evidence, notes as N
-from svchain.align import from_stems
-from svchain.audio import cached_track, load_mono
-from svchain.bridge import Bridge, BridgeError, decode_notes
-from svchain.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
+from svagent import config, evidence, notes as N
+from svagent.align import from_stems
+from svagent.audio import cached_track, load_mono
+from svagent.bridge import Bridge, BridgeError, decode_notes
+from svagent.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
 
 CLI_JS = Path(r"E:\SV_MCP\dist\src\cli.js")
 SR_OUT = 44100
@@ -106,8 +106,8 @@ def mix_support_mask(cfg, mixed: np.ndarray, f0_hz: np.ndarray,
     《潮声回响》实测：主唱 stem 支持率 91.4%，**和声 stem 只有 51.7%** ——
     约一半的和声音高在原始信号里根本没有对应峰，是分离器造出来的。
     """
-    from svchain.pitch.base import hz_to_cents
-    from svchain.pitch.rmvpe_est import CENTS_BASE, CENTS_PER_BIN
+    from svagent.pitch.base import hz_to_cents
+    from svagent.pitch.rmvpe_est import CENTS_BASE, CENTS_PER_BIN
 
     est = RmvpeEstimator(cfg.model("rmvpe"))
     est._load()

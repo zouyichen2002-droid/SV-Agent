@@ -37,12 +37,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, evidence
-from svchain.align import from_stems
-from svchain.audio import cached_track, load_mono
-from svchain.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
-from svchain.pitch.base import hz_to_cents, hz_to_midi
-from svchain.pitch.rmvpe_est import CENTS_BASE, CENTS_PER_BIN
+from svagent import config, evidence
+from svagent.align import from_stems
+from svagent.audio import cached_track, load_mono
+from svagent.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
+from svagent.pitch.base import hz_to_cents, hz_to_midi
+from svagent.pitch.rmvpe_est import CENTS_BASE, CENTS_PER_BIN
 
 SEP_ROOT = Path(__file__).resolve().parents[1] / "out" / "sep"
 INTERVALS = [(0, "同音"), (1, "小二"), (2, "大二"), (3, "小三"), (4, "大三"),

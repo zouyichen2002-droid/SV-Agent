@@ -31,10 +31,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, evidence
-from svchain.audio import cached_track, load_mono
-from svchain.pitch import CrepeEstimator, PraatEstimator, RmvpeEstimator, n_frames_for
-from svchain.pitch.base import hz_to_cents
+from svagent import config, evidence
+from svagent.audio import cached_track, load_mono
+from svagent.pitch import CrepeEstimator, PraatEstimator, RmvpeEstimator, n_frames_for
+from svagent.pitch.base import hz_to_cents
 
 SLOPE = 20.0        # 由 identify_rmvpe_forward.py 的重采样法独立测定（19.78±1.19）
 CONF_MIN = 0.30
@@ -188,7 +188,7 @@ def main() -> int:
         print(f"  {f:7.2f}Hz → {got:7.2f}Hz  误差 {1200*np.log2(got/f):+7.1f} 音分  "
               f"峰值均值 {c.mean():.3f}")
 
-    print("\n把结果写进 toolkit/svchain/pitch/rmvpe_est.py 的 MEL / CENTS_BASE，"
+    print("\n把结果写进 toolkit/svagent/pitch/rmvpe_est.py 的 MEL / CENTS_BASE，"
           "并在 specs/adr/ 里记一条。")
     return 0
 

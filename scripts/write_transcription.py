@@ -50,11 +50,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, evidence, lyrics, notes as N
-from svchain.align.ctc import CtcAligner, respace
-from svchain.audio import cached_track, load_mono
-from svchain.bridge import Bridge, BridgeError, decode_notes
-from svchain.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
+from svagent import config, evidence, lyrics, notes as N
+from svagent.align.ctc import CtcAligner, respace
+from svagent.audio import cached_track, load_mono
+from svagent.bridge import Bridge, BridgeError, decode_notes
+from svagent.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
 
 CLI_JS = Path(r"E:\SV_MCP\dist\src\cli.js")
 NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]

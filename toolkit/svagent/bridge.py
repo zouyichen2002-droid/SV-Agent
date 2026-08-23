@@ -61,7 +61,7 @@ class Bridge:
         init = self._request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "sv-bridge/svchain", "version": "0.1.0"},
+            "clientInfo": {"name": "SV-Agent/svagent", "version": "0.1.0"},
         })
         self.server_info = init.get("serverInfo", {})
         self._notify("notifications/initialized", {})

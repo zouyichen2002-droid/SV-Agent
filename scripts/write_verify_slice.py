@@ -38,9 +38,9 @@ import soundfile as sf
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, notes as N
-from svchain.align import stage1
-from svchain.bridge import Bridge, BridgeError
+from svagent import config, notes as N
+from svagent.align import stage1
+from svagent.bridge import Bridge, BridgeError
 
 CLI_JS = Path(r"E:\SV_MCP\dist\src\cli.js")
 SR_OUT = 44100
@@ -197,7 +197,7 @@ def main() -> int:
 
         chk = b.call("sv_query", {"action": "get_track_notes",
                                   "args": {"trackIndex": idx}})
-        from svchain.bridge import decode_notes
+        from svagent.bridge import decode_notes
         got = decode_notes(chk)
         print(f"\n  回读 {len(got)} 个音符（期望 {len(ns)}）")
 

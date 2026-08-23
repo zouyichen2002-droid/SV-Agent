@@ -1,4 +1,4 @@
-# sv-bridge
+# SV-Agent
 
 **An agent orchestration layer over the Synthesizer V MCP runtime** — memory, retrieval, tool design, and staged evaluation gates for vocal covers and original composition.
 
@@ -81,7 +81,7 @@ The reference audio, stems, lyric files and project files for the benchmark are 
         human  ──  direction, aesthetic judgment, final acceptance
           │
    ┌──────▼───────────────────────────────────────────┐
-   │  sv-bridge   (this repo)                         │
+   │  SV-Agent    (this repo)                         │
    │    orchestration + staged gates                  │
    │    memory  ·  retrieval  ·  evaluation harness    │
    └──────┬───────────────────────────────────────────┘

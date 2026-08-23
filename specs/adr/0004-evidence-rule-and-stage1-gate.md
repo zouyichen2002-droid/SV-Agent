@@ -5,7 +5,7 @@
 | 状态 | **已接受但待重审**（多声部重定义后，见 [ADR-0005](0005-polyphonic-vocal-transcription.md)）|
 | 日期 | 2026-08-20 |
 | 决策者 | 用户拍板（两问，选项与实测数据由实现方给出） |
-| 影响范围 | `toolkit/svchain/evidence.py`、`config.*.toml` 的 `[pitch]` 与 `[gates.stage1]` |
+| 影响范围 | `toolkit/svagent/evidence.py`、`config.*.toml` 的 `[pitch]` 与 `[gates.stage1]` |
 
 ## 决策一 · 证据规则：要求 rmvpe 参与确认
 

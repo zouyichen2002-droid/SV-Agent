@@ -28,9 +28,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, evidence
-from svchain.audio import cached_track, load_mono
-from svchain.pitch import (CrepeEstimator, PraatEstimator, RmvpeEstimator,
+from svagent import config, evidence
+from svagent.audio import cached_track, load_mono
+from svagent.pitch import (CrepeEstimator, PraatEstimator, RmvpeEstimator,
                            n_frames_for)
 
 # 交接文件 §5.3 记录的三个 pyin 失效点。新估计器必须在这里被单独检查，

@@ -45,12 +45,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, lyrics
-from svchain.align import from_stems
-from svchain.audio import load_mono
-from svchain.pitch import n_frames_for
-from svchain.pitch.dsp import mel_filterbank, stft_mag
-from svchain.pitch.rmvpe_est import (CENTS_BASE, CENTS_PER_BIN, CENTS_REF_HZ,
+from svagent import config, lyrics
+from svagent.align import from_stems
+from svagent.audio import load_mono
+from svagent.pitch import n_frames_for
+from svagent.pitch.dsp import mel_filterbank, stft_mag
+from svagent.pitch.rmvpe_est import (CENTS_BASE, CENTS_PER_BIN, CENTS_REF_HZ,
                                      RmvpeEstimator)
 
 # 音程名，用于判读次峰是不是「谐波关系」

@@ -5,7 +5,7 @@
 | 状态 | **已接受** |
 | 日期 | 2026-08-20 |
 | 决策者 | 实现方（技术性判断，非产品决策）。若要推翻，见文末条件 |
-| 影响范围 | `toolkit/svchain/pitch/rmvpe_arch.py`、`rmvpe_est.py`、`scripts/*rmvpe*.py` |
+| 影响范围 | `toolkit/svagent/pitch/rmvpe_arch.py`、`rmvpe_est.py`、`scripts/*rmvpe*.py` |
 
 ## 背景
 

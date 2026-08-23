@@ -30,8 +30,8 @@ import soundfile as sf
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config
-from svchain.align import stage1, stage2
+from svagent import config
+from svagent.align import stage1, stage2
 
 SR_OUT = 44100
 # 固定抽查点：交接文件明确记过的断言

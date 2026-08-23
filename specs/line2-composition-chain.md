@@ -24,7 +24,7 @@
 
 | 资产 | 位置 |
 |---|---|
-| 桥的 MCP 客户端（JSON-RPC / contextId 语义 / grouping / 批量上限） | `toolkit/svchain/bridge.py` |
+| 桥的 MCP 客户端（JSON-RPC / contextId 语义 / grouping / 批量上限） | `toolkit/svagent/bridge.py` |
 | 音符几何强制（0 重叠、时长边界） | `notes.enforce_geometry` |
 | 配置化 + 阶段门槛机制 | `config.py`、`[gates.*]` |
 | 可听对照的生成（左=参考、右=产出） | `scripts/make_*_checks.py` |

@@ -35,10 +35,10 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config
-from svchain.audio import load_mono
-from svchain.pitch.rmvpe_arch import E2E
-from svchain.pitch.rmvpe_est import RmvpeEstimator
+from svagent import config
+from svagent.audio import load_mono
+from svagent.pitch.rmvpe_arch import E2E
+from svagent.pitch.rmvpe_est import RmvpeEstimator
 
 # 覆盖 ±1 个八度的重采样倍率
 FACTORS = [0.5, 0.63, 0.79, 1.26, 1.587, 2.0]

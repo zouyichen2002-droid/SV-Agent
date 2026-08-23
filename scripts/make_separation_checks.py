@@ -26,7 +26,7 @@ import soundfile as sf
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config
+from svagent import config
 
 SR = 44100
 # 来自 eval/polyphony.py：RMVPE 多峰率最高的 10s 窗口

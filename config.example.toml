@@ -3,8 +3,8 @@
 
 [paths]
 models   = "E:/SynthV-models"          # 模型权重根目录，靠 scripts/fetch_models 重建
-cache    = "E:/sv-bridge/.cache"        # 中间产物（f0 轨迹等），已被 gitignore
-reports  = "E:/sv-bridge/eval/reports"  # eval 输出
+cache    = "E:/SV-Agent/.cache"        # 中间产物（f0 轨迹等），已被 gitignore
+reports  = "E:/SV-Agent/eval/reports"  # eval 输出
 
 [models]
 zh_ctc = "zh-ctc"          # 相对 paths.models

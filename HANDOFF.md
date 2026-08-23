@@ -308,15 +308,15 @@ blank   vocab['<pad>'] = 0
 
 **这 1.28GB 下了六次才成功**（静默截断、续传字节错乱、后台进程被回收、并行也只有 164 KB/s）。下载务必：单进程、`-C -` 续传、**下完必须核 sha256**（第一次拿到的文件大了 31,399,936 字节且 sha 不符）。
 
-配套脚本在 `E:\sv-bridge\prototypes\`（含该目录自己的 README 说明边界）：`ctc_align.py`（含自实现 Viterbi）、`respace.py`、`build_final.py`。**这些是上一个会话的一次性原型，能跑但没有工程结构**（无配置、路径硬编码、无测试、无错误处理）。正式实现时按 §1.1 的架构重写，把它们当参考实现和回归对照，不要直接当成模块。
+配套脚本在 `E:\SV-Agent\prototypes\`（含该目录自己的 README 说明边界）：`ctc_align.py`（含自实现 Viterbi）、`respace.py`、`build_final.py`。**这些是上一个会话的一次性原型，能跑但没有工程结构**（无配置、路径硬编码、无测试、无错误处理）。正式实现时按 §1.1 的架构重写，把它们当参考实现和回归对照，不要直接当成模块。
 
 ### 7.3 目录布局（已按此整理）
 
-**项目名：`sv-bridge`**（用户在被两次提示与上游 `synthv-agent-bridge` 有混淆风险后仍确认此名。**不要再劝**。缓解措施已落地：README 首屏的归属声明 + 职责分工表 + 仓库 description。）
+**项目名：`SV-Agent`**（用户在被两次提示与上游 `synthv-agent-bridge` 有混淆风险后仍确认此名。**不要再劝**。缓解措施已落地：README 首屏的归属声明 + 职责分工表 + 仓库 description。）
 
 ```
 E:\SV_MCP\           上游依赖，git 干净，只 git pull，不在此写代码
-E:\sv-bridge\        本项目，将 git init 推 GitHub
+E:\SV-Agent\        本项目，将 git init 推 GitHub
   toolkit/ skills/ specs/ specs/adr/ eval/ scripts/ prototypes/
   README.md .gitignore HANDOFF.md
 E:\SynthV-models\    1.2GB 模型，不进 git，靠 scripts/ 重建

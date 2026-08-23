@@ -29,11 +29,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config, evidence, lyrics, notes as N
-from svchain.align import from_stems
-from svchain.align.ctc import CtcAligner, line_windows
-from svchain.audio import cached_track, load_mono
-from svchain.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
+from svagent import config, evidence, lyrics, notes as N
+from svagent.align import from_stems
+from svagent.align.ctc import CtcAligner, line_windows
+from svagent.audio import cached_track, load_mono
+from svagent.pitch import CrepeEstimator, RmvpeEstimator, n_frames_for
 
 SEP_ROOT = Path(__file__).resolve().parents[1] / "out" / "sep"
 

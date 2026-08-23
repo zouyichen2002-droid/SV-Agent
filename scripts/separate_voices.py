@@ -28,7 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svchain import config
+from svagent import config
 
 DEFAULT_MODELS = [
     "mel_band_roformer_karaoke_gabox.ckpt",
@@ -52,7 +52,7 @@ def patch_librosa_get_duration() -> str:
     import librosa
 
     orig = librosa.get_duration
-    if getattr(orig, "_svchain_shim", False):
+    if getattr(orig, "_svagent_shim", False):
         return "已打过"
 
     def shim(*a, **kw):
@@ -60,7 +60,7 @@ def patch_librosa_get_duration() -> str:
             kw["path"] = kw.pop("filename")
         return orig(*a, **kw)
 
-    shim._svchain_shim = True
+    shim._svagent_shim = True
     librosa.get_duration = shim
     # audio_separator 里是 `import librosa` 后按属性访问，改模块属性即可生效
     return "已注入"
