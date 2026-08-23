@@ -207,9 +207,28 @@ def check_range(notes: list[Note], cfg: CheckCfg) -> list[Finding]:
     return out
 
 
-def check_leap(notes: list[Note], cfg: CheckCfg) -> list[Finding]:
+def _phrase_of(phrases: list[Phrase], n: int) -> list[int]:
+    """音符下标 → 所属乐句号；不属于任何乐句的记 -1。"""
+    owner = [-1] * n
+    for ph in phrases:
+        for i in range(max(0, ph.note_from), min(n, ph.note_to)):
+            owner[i] = ph.index
+    return owner
+
+
+def check_leap(notes: list[Note], cfg: CheckCfg,
+               phrases: list[Phrase] | None = None) -> list[Finding]:
+    """相邻音程。**跨乐句的不算。**
+
+    实测教训：不做乐句隔离时，段落之间的休止（例如副歌到主歌之间的 2 小节间奏）
+    会被当成一个 11 半音的跳进报出来。听者在气口处根本不会把两段连起来听，
+    那不是跳进。同一个错也出现在 prosody 的「字间」规则上。
+    """
     out = []
-    for a, b in zip(notes, notes[1:]):
+    owner = _phrase_of(phrases, len(notes)) if phrases else None
+    for i, (a, b) in enumerate(zip(notes, notes[1:])):
+        if owner is not None and owner[i] != owner[i + 1]:
+            continue
         d = b.midi - a.midi
         if abs(d) > cfg.leap_max_semitones:
             out.append(Finding("leap", "warn", f"音符 {a.index}→{b.index}",
@@ -241,6 +260,14 @@ def check_scale(notes: list[Note], key_root: int, quality: str,
 def check_cadence(notes: list[Note], phrases: list[Phrase]) -> list[Finding]:
     out = []
     for ph in phrases:
+        # 边界检查：音符列表与乐句下标失同步时要**报告**，不能崩。
+        # 实测教训：灵敏度测试里删掉一个音符，这里直接 IndexError ——
+        # 检查器崩掉等于没有检查，比漏报更糟。
+        if ph.note_to > len(notes) or ph.note_from >= len(notes):
+            out.append(Finding("cadence", "block", f"乐句 {ph.index}",
+                               f"乐句下标 [{ph.note_from},{ph.note_to}) 超出音符数 "
+                               f"{len(notes)}，无法检查"))
+            continue
         if ph.chord_root is None or ph.note_to <= ph.note_from:
             continue
         last = notes[ph.note_to - 1]
@@ -261,6 +288,11 @@ def check_phrase(notes: list[Note], phrases: list[Phrase],
     """
     out = []
     for ph in phrases:
+        if ph.note_to > len(notes) or ph.note_from >= len(notes):
+            out.append(Finding("phrase", "block", f"乐句 {ph.index}",
+                               f"乐句下标 [{ph.note_from},{ph.note_to}) 超出音符数 "
+                               f"{len(notes)}，无法检查"))
+            continue
         seg = notes[ph.note_from:ph.note_to]
         for a, b in zip(seg, seg[1:]):
             gap = b.onset_beats - a.end_beats
@@ -273,9 +305,13 @@ def check_phrase(notes: list[Note], phrases: list[Phrase],
 
 # ---------------------------------------------------------------- 倒字
 
-def check_prosody(notes: list[Note], text: str,
-                  cfg: CheckCfg) -> list[Finding]:
-    """倒字风险。**启发式**，作用是缩小范围而不是下结论，见模块 docstring。"""
+def check_prosody(notes: list[Note], text: str, cfg: CheckCfg,
+                  phrases: list[Phrase] | None = None) -> list[Finding]:
+    """倒字风险。**启发式**，作用是缩小范围而不是下结论，见模块 docstring。
+
+    `phrases` 给了就只在**乐句内**算「字间」音程 —— 跨乐句有气口，
+    听者会重新归一化，那里的音程不构成倒字。见 check_leap 的同类说明。
+    """
     P = cfg.prosody
     toned = tones_of(text)
     # 把音符按字分组：非拖腔音符开一个新字，后续 SUSTAIN 归到它
@@ -292,6 +328,10 @@ def check_prosody(notes: list[Note], text: str,
     if not groups:
         return []
     peak = max(n.midi for n in notes)
+    # 每个字组归属哪个乐句（用组内第一个音符的下标判定）
+    owner = _phrase_of(phrases, len(notes)) if phrases else None
+    grp_owner = [owner[g[0].index] if owner and g[0].index < len(owner) else 0
+                 for g in groups]
 
     out = []
     for i, ((ch, tone, py), grp) in enumerate(zip(toned, groups)):
@@ -311,8 +351,9 @@ def check_prosody(notes: list[Note], text: str,
                     score += P.w_tone2_down * P.within_multiplier
                     why.append(f"字内下行 {d:+d} 半音，对抗 2 声的升")
 
-        # 字间：到下一个字的音程
-        if i + 1 < len(groups):
+        # 字间：到下一个字的音程（同一乐句内才算）
+        if i + 1 < len(groups) and (owner is None
+                                    or grp_owner[i] == grp_owner[i + 1]):
             d = groups[i + 1][0].midi - grp[-1].midi
             if abs(d) >= P.between_min_semitones:
                 if tone == 4 and d > 0:
@@ -348,11 +389,11 @@ def run_all(notes: list[Note], text: str, key_root: int, quality: str,
     fs: list[Finding] = []
     fs += check_count(notes, text)
     fs += check_range(notes, cfg)
-    fs += check_leap(notes, cfg)
+    fs += check_leap(notes, cfg, phrases)
     fs += check_scale(notes, key_root, quality, cfg)
     fs += check_cadence(notes, phrases)
     fs += check_phrase(notes, phrases, cfg)
-    fs += check_prosody(notes, text, cfg)
+    fs += check_prosody(notes, text, cfg, phrases)
     order = {"block": 0, "warn": 1, "info": 2}
     return sorted(fs, key=lambda f: (order[f.severity], -f.score, f.kind))
 
