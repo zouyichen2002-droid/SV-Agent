@@ -38,8 +38,11 @@ class BridgeError(RuntimeError):
 class Bridge:
     """一次会话。用 with 语句，退出时确保子进程被收掉。"""
 
-    cli_js: Path
+    cli_js: Path | None = None
     node: str = r"C:\Program Files\nodejs\node.exe"
+    argv: list[str] | None = None      # 给了就用它，不给则起 node cli_js
+    cwd: Path | None = None
+    client_name: str = "SV-Agent/svagent"
     timeout_s: float = 60.0
     verbose: bool = False
     _proc: subprocess.Popen | None = field(default=None, repr=False)
@@ -50,18 +53,24 @@ class Bridge:
 
     # ---------- 生命周期 ----------
     def __enter__(self) -> "Bridge":
+        if self.argv:
+            cmd, cwd = list(self.argv), self.cwd
+        elif self.cli_js:
+            cmd, cwd = [self.node, str(self.cli_js)], self.cli_js.parents[2]
+        else:
+            raise BridgeError("要么给 cli_js，要么给 argv")
         self._proc = subprocess.Popen(
-            [self.node, str(self.cli_js)],
+            cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
-            cwd=str(self.cli_js.parents[2]),
+            cwd=str(cwd) if cwd else None,
         )
         threading.Thread(target=self._pump_stdout, daemon=True).start()
         threading.Thread(target=self._pump_stderr, daemon=True).start()
         init = self._request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "SV-Agent/svagent", "version": "0.1.0"},
+            "clientInfo": {"name": self.client_name, "version": "0.1.0"},
         })
         self.server_info = init.get("serverInfo", {})
         self._notify("notifications/initialized", {})

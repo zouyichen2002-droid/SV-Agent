@@ -100,6 +100,10 @@ class Finding:
     where: str
     detail: str
     score: float = 0.0
+    # 涉及的音符下标。`where` 是给人读的，**不要去正则解析它** ——
+    # 自修复循环靠这个字段定位要改哪个音符。空元组表示这是全局问题。
+    # 放在 score 之后，因为 prosody 是按位置传 score 的。
+    targets: tuple[int, ...] = ()
 
     def __str__(self) -> str:
         s = f"[{self.severity:5s}] {self.kind:8s} {self.where:<14} {self.detail}"
@@ -199,11 +203,13 @@ def check_range(notes: list[Note], cfg: CheckCfg) -> list[Finding]:
             out.append(Finding("range", "block", f"音符 {n.index}",
                                f"{note_name(n.midi)} 越界"
                                f"（舒适区 {note_name(cfg.range_lo)}–"
-                               f"{note_name(cfg.range_hi)}）"))
+                               f"{note_name(cfg.range_hi)}）",
+                               targets=(n.index,)))
         elif (n.midi - cfg.range_lo < cfg.range_edge_semitones
               or cfg.range_hi - n.midi < cfg.range_edge_semitones):
             out.append(Finding("range", "warn", f"音符 {n.index}",
-                               f"{note_name(n.midi)} 贴边，长音会吃力"))
+                               f"{note_name(n.midi)} 贴边，长音会吃力",
+                               targets=(n.index,)))
     return out
 
 
@@ -233,7 +239,8 @@ def check_leap(notes: list[Note], cfg: CheckCfg,
         if abs(d) > cfg.leap_max_semitones:
             out.append(Finding("leap", "warn", f"音符 {a.index}→{b.index}",
                                f"{note_name(a.midi)}→{note_name(b.midi)} "
-                               f"跳 {abs(d)} 半音（上限 {cfg.leap_max_semitones}）"))
+                               f"跳 {abs(d)} 半音（上限 {cfg.leap_max_semitones}）",
+                               targets=(a.index, b.index)))
     return out
 
 
@@ -253,7 +260,8 @@ def check_scale(notes: list[Note], key_root: int, quality: str,
     for n in outside[:12]:
         out.append(Finding("scale", "info", f"音符 {n.index}",
                            f"{note_name(n.midi)} 不在 "
-                           f"{NAMES[key_root]}{'大调' if quality=='major' else '小调'} 内"))
+                           f"{NAMES[key_root]}{'大调' if quality=='major' else '小调'} 内",
+                           targets=(n.index,)))
     return out
 
 
@@ -275,7 +283,8 @@ def check_cadence(notes: list[Note], phrases: list[Phrase]) -> list[Finding]:
         if (last.midi - ph.chord_root) % 12 not in triad:
             out.append(Finding("cadence", "warn", f"乐句 {ph.index}",
                                f"句末 {note_name(last.midi)} 不在 "
-                               f"{NAMES[ph.chord_root]}{ph.chord_quality} 的和弦音上"))
+                               f"{NAMES[ph.chord_root]}{ph.chord_quality} 的和弦音上",
+                               targets=(last.index,)))
     return out
 
 
@@ -299,7 +308,8 @@ def check_phrase(notes: list[Note], phrases: list[Phrase],
             if gap > cfg.phrase_gap_max_beats:
                 out.append(Finding("phrase", "warn", f"乐句 {ph.index}",
                                    f"音符 {a.index}→{b.index} 之间空 "
-                                   f"{gap:.2f} 拍，乐句被撕开"))
+                                   f"{gap:.2f} 拍，乐句被撕开",
+                                   targets=(a.index, b.index)))
     return out
 
 
@@ -376,7 +386,8 @@ def check_prosody(notes: list[Note], text: str, cfg: CheckCfg,
 
         if score >= P.flag_at:
             out.append(Finding("prosody", "warn", f"第{i+1}字「{ch}」",
-                               f"{py}（{tone}声）· " + "；".join(why), score))
+                               f"{py}（{tone}声）· " + "；".join(why), score,
+                               targets=tuple(x.index for x in grp)))
     return out
 
 

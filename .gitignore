@@ -70,3 +70,8 @@ dist/
 .DS_Store
 Thumbs.db
 .claude/
+
+# ---- 例外：结构模板 ----
+# 空 SynthV 工程，零音符、无任何第三方数据，但是工作流的必需依赖
+# （每首新歌靠它当 .svp 的结构模板，见 toolkit/svagent/svp_build.py）
+!songs/_template/*.svp
