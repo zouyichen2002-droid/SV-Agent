@@ -75,6 +75,11 @@ dist/
 Thumbs.db
 .claude/
 
+# ---- 生成物 ----
+# 仪表盘每次动作后重新生成，是文件的视图而不是真相来源（ADR-0012）。
+# 要归档某一刻的界面，它会进 checkpoint 的 blobs/，不进 git。
+songs/*/dashboard.html
+
 # ---- 例外：结构模板 ----
 # 空 SynthV 工程，零音符、无任何第三方数据，但是工作流的必需依赖
 # （每首新歌靠它当 .svp 的结构模板，见 toolkit/svagent/svp_build.py）

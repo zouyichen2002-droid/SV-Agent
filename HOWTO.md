@@ -41,6 +41,23 @@ python -c "import sys; sys.path.insert(0,r'E:\sv-bridge\toolkit'); from svagent 
 
 ---
 
+## 随时看一眼：仪表盘
+
+任何时候想知道「这首歌走到哪了、卡在哪、下一条命令是什么」，生成一张页面：
+
+    SVAGENT_SONG=<slug> python E:\sv-bridge\scripts\dashboard.py --open
+
+它写出 `songs/<slug>/dashboard.html` 并用浏览器打开，**每 5 秒自动刷新**
+（右上角可以关掉）。所以做歌时把它开在另一个窗口，每跑完一步就会自己更新。
+
+页面上的数字全部来自 `state.inspect()`，**是从文件现算的，不是记下来的** ——
+你在 SynthV 里手改了工程，刷新一下就能看见。
+
+第一版只读：所有操作还是在对话里说（「回到上一版」「这版不行」）。
+另外四个面板（安全 / 会话树 / 本轮 / 指标）还没建，页面底部列着它们属于第几项。
+
+---
+
 ## 六步
 
 每一步的完整命令。`SVAGENT_SONG=<slug>` 是必须的前缀。

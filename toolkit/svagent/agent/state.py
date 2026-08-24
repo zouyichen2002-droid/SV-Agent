@@ -53,12 +53,22 @@ class Step:
     evidence: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
     command: str | None = None
+    # 在等第几步。**「被上游挡住」和「自己坏了」是两件事** ——
+    # 仪表盘建好当天就暴露了这个缺失：主旋律同轨重叠 57 处（真的坏了）
+    # 和后面三步「等主旋律」被画成一样的红叉，看上去像三处出问题。
+    # 这个区分属于状态模型，所以补在这里，不在渲染层拿字符串猜。
+    waits_for: int | None = None
+
+    @property
+    def blocked_by_self(self) -> bool:
+        """有阻塞，且不只是在等上游。"""
+        return bool(self.blockers) and self.waits_for is None
 
     @property
     def mark(self) -> str:
         if self.done:
             return "✓"
-        return "…" if not self.blockers else "✗"
+        return "✗" if self.blocked_by_self else "…"
 
 
 @dataclass
@@ -72,6 +82,11 @@ class ProjectState:
             if not s.done:
                 return s
         return None
+
+    @property
+    def n_done(self) -> int:
+        """完成了几步。**放在这里而不是让前端自己数** —— 见 dashboard.py 的规则。"""
+        return sum(1 for s in self.steps if s.done)
 
     def report(self) -> str:
         out = [self.proj.describe(), ""]
@@ -163,6 +178,7 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
     harms = [t for t in tracks if t["name"].startswith("和声")]
     if not s2.done:
         s3.blockers.append("等步骤 2 的歌词")
+        s3.waits_for = 2
     elif lead is None:
         s3.blockers.append("工程里没有「主旋律」轨")
     else:
@@ -187,6 +203,7 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
               command=_cmd("step4_accompaniment.py", slug, "--write"))
     if not s3.done:
         s4.blockers.append("等步骤 3 的主旋律")
+        s4.waits_for = 3
     else:
         if proj.mid.exists():
             s4.evidence.append(f"伴奏 MIDI {proj.mid.name} "
@@ -231,6 +248,7 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
             tuned.append((t["name"], pts))
     if not s4.done:
         s5.blockers.append("等步骤 4 的伴奏音频")
+        s5.waits_for = 4
     else:
         if audio:
             for t in audio:
@@ -258,6 +276,7 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
             on.append((t["name"], enabled))
     if not s5.done:
         s6.blockers.append("等步骤 5")
+        s6.waits_for = 5
     elif not on:
         s6.blockers.append("还没有任何轨启用 FX")
     else:
