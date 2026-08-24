@@ -1,4 +1,12 @@
-"""驱动 flstudio-mcp 的客户端。复用 `bridge.Bridge` 的 stdio/JSON-RPC 传输。
+"""**⚠ 不在第一版主链路里。** 创作者 2026-08-23 拍板：
+「FL 桥确实没什么用，可以从第一版的逻辑中删除，如果后面有可能再加上」。
+
+保留代码，但不再被任何步骤脚本引用。要重新启用见
+`specs/adr/0011-drop-fl-bridge-from-v1.md`。
+
+原始说明如下。
+
+驱动 flstudio-mcp 的客户端。复用 `bridge.Bridge` 的 stdio/JSON-RPC 传输。
 
 ## 为什么不注册到 Claude Desktop
 

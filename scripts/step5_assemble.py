@@ -183,21 +183,12 @@ def main() -> int:
     print("\n" + "=" * 70)
     print("电平与频段")
     print("=" * 70)
-    pk = 20 * np.log10(max(1e-9, float(np.abs(mono).max())))
-    rms = 20 * np.log10(max(1e-9, float(np.sqrt((mono ** 2).mean()))))
-    N, HOP = 2048, 512
-    w = np.hanning(N)
-    idx = np.arange(N)[None, :] + HOP * np.arange((len(mono) - N) // HOP)[:, None]
-    S = np.abs(np.fft.rfft(mono[idx] * w, axis=1)) ** 2
-    f = np.fft.rfftfreq(N, 1 / sr)
-    tot = S.sum() or 1.0
-    band = {"<250": (0, 250), "250-4k": (250, 4000), ">4k": (4000, sr / 2)}
-    print(f"  peak {pk:.1f} dB　rms {rms:.1f} dB")
-    for nm, (lo, hi) in band.items():
-        pct = 100 * S[:, (f >= lo) & (f < hi)].sum() / tot
-        print(f"  {nm:8} {pct:5.1f}%")
-    if pk > -0.5:
-        print("  ⚠ peak 贴顶，归一化可能没关")
+    # 用共享模块 svagent.audio，**不在这里重写一遍 STFT**。
+    # 两个入口各自实现同一段分析必然产出两个不同的数字 —— 对齐验证那次
+    # 就是这么来的（0.340 vs 0.360，两边都不报错）。
+    from svagent import audio as A
+    st = A.analyze(AUDIO)
+    print(A.report(st))
 
     if not a.write:
         print("\n没有 --write，不碰工程文件。")

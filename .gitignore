@@ -23,6 +23,10 @@ lyrics/
 # SynthV 工程文件（含第三方乐谱数据）
 *.svp
 *.svpk
+# 唯一例外：**零音符的空工程模板**。它不含任何乐谱内容，
+# 但携带创作者本机 SynthV 版本的完整字段结构（version 196），
+# 是直写 .svp 的结构来源（ADR-0009）。缺了它 agent 就得重新反推 schema。
+!songs/_template/empty_*.svp
 
 # ---- 模型权重：体积 + 第三方，靠 scripts/ 重建 ----
 models/
