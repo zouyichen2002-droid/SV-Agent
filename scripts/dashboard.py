@@ -25,16 +25,29 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--open", action="store_true", help="生成后用默认浏览器打开")
     ap.add_argument("--refresh", type=int, default=5, help="自动刷新秒数")
+    ap.add_argument("--watch", action="store_true",
+                    help="盯住源文件，一变就重新生成。**这是常驻进程**，"
+                         "别从聊天里的运行按钮启动，那里没法 Ctrl-C")
+    ap.add_argument("--minutes", type=float, default=20.0,
+                    help="监视多久后自动收工（默认 20 分钟）")
     a = ap.parse_args()
 
-    p = D.write(refresh_s=a.refresh)
+    p = D.write(refresh_s=a.refresh, live=a.watch)
     print(f"仪表盘　{p}　{p.stat().st_size} B")
     if a.open:
         import os
         os.startfile(str(p))          # noqa: S606  Windows only
         print("已在浏览器打开。")
-    else:
+    elif not a.watch:
         print("加 --open 直接打开，或者自己双击这个文件。")
+
+    if a.watch:
+        try:
+            D.watch(refresh_s=a.refresh, minutes=a.minutes)
+        except KeyboardInterrupt:
+            print()
+            print("停止监视。页面变回静态快照 —— 下次打开记得重新生成。")
+            D.write(refresh_s=a.refresh, live=False)
     return 0
 
 

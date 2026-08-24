@@ -164,3 +164,44 @@ def test_被上游挡住和自己坏了必须画得不一样(html: str):
     assert html.count('class="mark wait"') == 3      # 三个在等
     assert html.count('class="blk"') == 1            # 阻塞原因也要跟着分开
     assert html.count('class="waitblk"') == 3
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-23 的回归测试：创作者改了歌词，页面还显示旧字数。
+#
+# 根因不是算错，是**没人重新生成**。当时页脚还写着「不可能和真实状态对不上」——
+# 一句站不住的话。这两条锁住修复：来源列表必须完整、指纹必须认得出改动。
+# ---------------------------------------------------------------------------
+
+def test_歌词必须在监视范围内():
+    """漏掉任何一个来源，表现都是「文件改了但页面不动」，而且不报错。"""
+    proj = _mixed().proj
+    srcs = {p.name for p in proj.sources}
+    for must in ("lyrics.txt", "x.svp", "x.mid", "x.wav", "project.json"):
+        assert must in srcs, f"{must} 不在 proj.sources 里，监视器会漏掉它"
+
+
+def test_源文件一改_指纹就必须变(tmp_path):
+    """指纹认不出改动，监视器就永远不会重新生成。"""
+    ly = tmp_path / "lyrics.txt"
+    ly.write_text("一二三", encoding="utf-8")
+    proj = PJ.SongProject(
+        slug="t_stamp", title="t", lyrics=ly, svp=tmp_path / "x.svp",
+        bpm=66.0, form=[("主歌1", 8)], mid=tmp_path / "x.mid",
+        wav=tmp_path / "x.wav")
+    before = D.sources_stamp(proj)
+    ly.write_text("一二三四", encoding="utf-8")     # 就是创作者加的那个字
+    assert D.sources_stamp(proj) != before
+
+
+def test_徽章必须诚实():
+    """静态快照不许把自己画成实时的 —— 这正是那次误导的来源。"""
+    st = _mixed()
+    assert "静态快照" in D.render(st, live=False)
+    assert "监视中" not in D.render(st, live=False)
+    assert "监视中" in D.render(st, live=True)
+
+
+def test_页脚不许再声称不可能过期():
+    """原话是「所以它不可能和真实状态对不上」。它可以，而且确实对不上过。"""
+    assert "不可能和真实状态对不上" not in D.render(_mixed())

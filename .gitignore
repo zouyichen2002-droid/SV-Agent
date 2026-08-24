@@ -78,9 +78,21 @@ Thumbs.db
 # ---- 生成物 ----
 # 仪表盘每次动作后重新生成，是文件的视图而不是真相来源（ADR-0012）。
 # 要归档某一刻的界面，它会进 checkpoint 的 blobs/，不进 git。
-songs/*/dashboard.html
+songs/*/dashboard*.html
 
 # ---- 例外：结构模板 ----
 # 空 SynthV 工程，零音符、无任何第三方数据，但是工作流的必需依赖
 # （每首新歌靠它当 .svp 的结构模板，见 toolkit/svagent/svp_build.py）
 !songs/_template/*.svp
+
+# 手工备份
+*.bak
+
+# agent 的账本与 checkpoint（出处记录，不是真相来源）
+songs/*/.agent/
+
+# 幂等测试的沙盒（跑完自动删）
+songs/_idem*/
+
+# 测试结果报告（是「上次测的结果」，不是真相来源）
+.agent/

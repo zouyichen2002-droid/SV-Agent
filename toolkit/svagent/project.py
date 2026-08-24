@@ -65,6 +65,29 @@ class SongProject:
         return self.svp.parent / "_backup"
 
     @property
+    def agent_dir(self) -> Path:
+        """agent 自己的账本与 checkpoint。**不进 git**，也不是真相来源 ——
+        删掉它只会丢掉「上次是我写的」这条出处记录，六步状态照样算得出来。
+        """
+        return SONGS / self.slug / ".agent"
+
+    @property
+    def stop_file(self) -> Path:
+        """建这个文件 = 让 agent 在下一个动作之前停下。"""
+        return self.agent_dir / ".stop"
+
+    @property
+    def sources(self) -> list[Path]:
+        """状态由这些文件决定 —— 任何一个变了，观察结果就可能变。
+
+        **放在这里，不放在仪表盘里。** 将来多一个来源（比如 checkpoint 目录），
+        监视器要自动跟上；写死在前端的列表迟早漏一个，
+        表现就是「文件改了但页面不动」，而且不报错。
+        """
+        return [config_path(self.slug), TEMPLATE, self.lyrics,
+                self.svp, self.mid, self.wav]
+
+    @property
     def duration_s(self) -> float:
         return self.n_bars * 4 * 60.0 / self.bpm
 

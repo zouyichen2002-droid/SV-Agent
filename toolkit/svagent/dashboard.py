@@ -42,11 +42,13 @@ import time
 from pathlib import Path
 
 from . import project as PJ
+from .agent import idem as ID
+from .agent import safety as SF
+from .agent import safewrite as SW
 from .agent import state as ST
 
 # 还没建造的面板：名字 · 属于第几项 · 一句话说明。**只列，不画。**
 PENDING_PANELS = [
-    ("安全", 1, "原子写 · 哈希校验 · 可中断 · 超时 · 幂等，各一个灯"),
     ("会话树", 3, "分支 · HEAD · 每个节点的裁决与度量"),
     ("本轮", 5, "诊断 → 假设 → 动作 → 度量前后对比"),
     ("指标", 7, "八项检查 + 三个新指标的当前值与阈值"),
@@ -152,6 +154,31 @@ ul.ev li.waitblk::before { content: "⏳"; left: 0; font-size: 11px; }
 .foot { margin-top: 24px; font-size: 12px; color: var(--fg3);
         line-height: 1.8; }
 label.auto { cursor: pointer; user-select: none; }
+
+.lamp { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+        padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.lamp:first-of-type { border-top: 0; }
+.dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%;
+       background: var(--wait); }
+.lamp.on  .dot { background: var(--done); }
+.lamp.off .dot { background: var(--block); }
+.lamp.unknown .dot { background: transparent; border: 1px solid var(--fg3); }
+.lnm { font-weight: 500; min-width: 74px; color: var(--fg); }
+.ldt { color: var(--fg2); }
+.lamp.off .ldt { color: var(--block); }
+.lhint { flex: 1 1 100%; padding-left: 93px; color: var(--fg3);
+         font-size: 12.5px; }
+.fl { display: flex; gap: 8px; font-size: 12.5px; padding: 2px 0 2px 93px;
+      color: var(--fg3); }
+.fl b { font-weight: 400; color: var(--fg2); min-width: 150px; }
+.fl.ext b, .fl.ext span { color: var(--block); }
+
+.live { display: inline-block; padding: 1px 8px; border-radius: 10px;
+        font-size: 12px; border: 1px solid transparent; margin-bottom: 4px; }
+.live.on  { color: var(--done);  background: var(--done-bg);
+            border-color: var(--done); }
+.live.off { color: var(--block); background: var(--block-bg);
+            border-color: var(--block); }
 """
 
 JS = """
@@ -224,8 +251,66 @@ def _step_card(s: ST.Step, is_next: bool) -> str:
     return "".join(out)
 
 
-def render(st: ST.ProjectState, *, refresh_s: int = 5) -> str:
-    """把一次观察渲染成完整 HTML。**这里只排版，不算任何东西。**"""
+def _safety_panel(sf: SF.SafetyState) -> str:
+    """安全面板（第 1 项）。**每盏灯的颜色和文字都是 safety.inspect() 给的。**"""
+    rows = []
+    for l in sf.lamps:
+        rows.append(
+            f'<div class="lamp {l.color}"><span class="dot"></span>'
+            f'<span class="lnm">{_e(l.name)}</span>'
+            f'<span class="ldt">{_e(l.detail)}</span>'
+            + (f'<span class="lhint">→ {_e(l.hint)}</span>' if l.hint else "")
+            + "</div>")
+        # 哈希那一项要逐文件摊开 —— 只说「1 个文件被改了」还得去猜是哪个
+        if l.name == "哈希校验":
+            for p, v in sf.files:
+                cls = "fl ext" if v == SW.EXTERNAL else "fl"
+                rows.append(f'<div class="{cls}"><b>{_e(p.name)}</b>'
+                            f'<span>{_e(SF.VERDICT_ZH[v])}</span></div>')
+    return (f'<h2>安全　第 1 项</h2><div class="card">{"".join(rows)}</div>')
+
+
+def _actions_panel() -> str:
+    """动作表（第 2 项）：每个动作一行，标幂等 ✓/✗。
+
+    **表头必须先说这张表是什么时候测的。** 代码改过之后那些 ✓ 就不再算数，
+    而一张不肯承认自己过期的表，比没有表更坏 —— 和仪表盘那次是同一条教训。
+    """
+    rep = ID.load_report()
+    if not rep:
+        return ('<h2>动作表　第 2 项</h2><div class="card"><div class="lamp '
+                'unknown"><span class="dot"></span><span class="ldt">'
+                '还没跑过幂等测试</span></div></div>')
+    stale = ID.report_is_stale(rep)
+    when = time.strftime("%m-%d %H:%M",
+                         time.localtime(max(v["ts"] for v in rep.values())))
+    head = (f'<div class="lamp {"off" if stale else "on"}">'
+            f'<span class="dot"></span><span class="lnm">测于 {when}</span>'
+            f'<span class="ldt">'
+            + ("代码在这之后改过 —— 下面这些 ✓ 已经不算数了，重跑 "
+               "pytest tests/test_idempotence.py" if stale
+               else "这是最新代码的结果")
+            + "</span></div>")
+    rows = []
+    for name, v in rep.items():
+        s = v["stats"]
+        got = "　".join(f"{k}={s[k]}" for k in s if s[k])
+        rows.append(
+            f'<div class="lamp {"on" if v["ok"] else "off"}">'
+            f'<span class="dot"></span><span class="lnm">{_e(name)}</span>'
+            f'<span class="ldt">{_e(v["desc"])}　{_e(got)}</span>'
+            + (f'<span class="lhint">→ {_e(v["detail"])}</span>'
+               if v.get("detail") else "") + "</div>")
+    return f'<h2>动作表　第 2 项</h2><div class="card">{head}{"".join(rows)}</div>'
+
+
+def render(st: ST.ProjectState, *, refresh_s: int = 5,
+           live: bool = False, sf: SF.SafetyState | None = None) -> str:
+    """把一次观察渲染成完整 HTML。**这里只排版，不算任何东西。**
+
+    `live` 决定页面上那枚徽章说什么。**它必须诚实** ——
+    静态快照就说自己是静态快照，不许让人以为看的是实时状态。
+    """
     p = st.proj
     nx = st.next_step
     d = p.duration_s
@@ -254,6 +339,8 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5) -> str:
         f'{int(d // 60)}:{int(d % 60):02d}</div>',
         '</div>',
         '<div class="side">',
+        ('<span class="live on">监视中 · 文件一变就重算</span><br>' if live
+         else '<span class="live off">静态快照 · 不会自己更新</span><br>'),
         f'生成于 {now}<br>',
         '<label class="auto"><input type="checkbox" id="auto"> '
         f'每 {refresh_s} 秒自动刷新</label>',
@@ -264,6 +351,10 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5) -> str:
     for s in st.steps:
         body.append(_step_card(s, is_next=bool(nx and s.n == nx.n)))
 
+    if sf is not None:
+        body.append(_safety_panel(sf))
+    body.append(_actions_panel())
+
     body += [
         '<div class="pending">',
         '<div class="row" style="color:var(--fg2)">还没建造的面板'
@@ -273,8 +364,10 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5) -> str:
         '<div class="foot">',
         f'数据来自 <span class="mono">svagent.agent.state.inspect()</span>，'
         f'渲染器 <span class="mono">svagent/dashboard.py</span>。<br>',
-        '本页<b>只渲染，不计算</b> —— 所有数字都是库算好的，'
-        '所以它不可能和真实状态对不上。<br>',
+        '本页<b>只渲染，不计算</b> —— 数字都是库算好的，'
+        '所以它不会和库算出两个不同的值。<br>'
+        '但它是<b>快照</b>：没人重新生成它就会过期 —— '
+        '「不会算错」和「不会过期」是两件事，别混。<br>',
         f'工程 <span class="mono">{_e(p.svp)}</span><br>',
         f'歌词 <span class="mono">{_e(p.lyrics)}</span>',
         '</div></div>',
@@ -292,10 +385,67 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5) -> str:
 
 
 def write(st: ST.ProjectState | None = None, *, path: Path | None = None,
-          refresh_s: int = 5) -> Path:
+          refresh_s: int = 5, live: bool = False) -> Path:
     """观察一次并写出 HTML。→ 写到的路径。"""
     st = st or ST.inspect()
     path = path or (PJ.SONGS / st.proj.slug / "dashboard.html")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render(st, refresh_s=refresh_s), encoding="utf-8")
+    # 页面自己走原子写。一个渲染到一半的仪表盘正好会在创作者刷新的那一刻
+    # 显示半截 HTML —— 这一项防的就是这个。
+    SW.write_text(path, render(st, refresh_s=refresh_s, live=live,
+                               sf=SF.inspect(st.proj)))
     return path
+
+
+def sources_stamp(proj: PJ.SongProject) -> dict[str, str | None]:
+    """源文件指纹。**来源列表由 `proj.sources` 给，哈希算法由 `safewrite` 给。**
+
+    这个函数自己什么都不算 —— 它只是把两个库函数拼起来。
+    两个入口各自实现同一段哈希，迟早算出两个不同的值而且两边都不报错
+    （`audio.py` 的 0.340 / 0.360 就是这么来的）。
+    """
+    return {str(f): SW.fingerprint(f) for f in proj.sources}
+
+
+def watch(slug: str | None = None, *, path: Path | None = None,
+          refresh_s: int = 5, poll_s: float = 1.0, minutes: float = 20.0,
+          log=print) -> None:
+    """盯住源文件，一变就重新生成。Ctrl-C 退出。
+
+    ## 为什么这个不是锦上添花
+
+    `dashboard.html` 是**快照**，不是视图。创作者手改歌词、或者在 SynthV 里
+    动了工程之后，浏览器再怎么刷新，读到的都是同一份旧 HTML ——
+    页面会理直气壮地显示一个过期的数字，**而且不报错**。
+
+    这是本项目第三次踩同一类坑：`audio.py` 的 0.340 / 0.360、
+    `fl_ping` 的假阴性，都是「显示层安静地说了假话」。前两次的代价是
+    我让创作者去修一个不存在的问题。
+
+    所以监视模式是「状态从文件现算」这句话在**界面上**成立的前提。
+    没有它，那句话只在生成的那一瞬间为真。
+
+    ## 为什么一定要有 `minutes`
+
+    这是个常驻进程，从聊天里的运行按钮启动就会永远转圈 —— 那里没有 Ctrl-C。
+    所以它**必须自己会收工**：默认盯 20 分钟，到点自动退出并把页面标回
+    「静态快照」。一个永远不结束、又不肯承认自己已经不再更新的界面，
+    比没有界面更坏。
+    """
+    slug = slug or PJ.current().slug
+    deadline = time.monotonic() + minutes * 60.0
+    last: dict | None = None
+    log(f"监视 {slug} 的 {len(PJ.load(slug).sources)} 个源文件"
+        f"　{minutes:.0f} 分钟后自动收工，或 Ctrl-C")
+    while time.monotonic() < deadline:
+        proj = PJ.load(slug)          # 每轮重读，project.json 改了也跟得上
+        cur = sources_stamp(proj)
+        if cur != last:
+            p = write(ST.inspect(proj), path=path, refresh_s=refresh_s,
+                      live=True)
+            log(f"{time.strftime('%H:%M:%S')}  重新生成  {p}")
+            last = cur
+        time.sleep(poll_s)
+    # 到点了：页面必须改口说自己是静态的，否则它会顶着绿徽章慢慢过期
+    write(ST.inspect(PJ.load(slug)), path=path, refresh_s=refresh_s, live=False)
+    log(f"{minutes:.0f} 分钟到，停止监视。页面已标回「静态快照」。")
