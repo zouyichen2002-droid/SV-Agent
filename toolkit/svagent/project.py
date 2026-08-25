@@ -84,8 +84,15 @@ class SongProject:
         监视器要自动跟上；写死在前端的列表迟早漏一个，
         表现就是「文件改了但页面不动」，而且不报错。
         """
-        return [config_path(self.slug), TEMPLATE, self.lyrics,
-                self.svp, self.mid, self.wav]
+        out = [config_path(self.slug), TEMPLATE, self.lyrics,
+               self.svp, self.mid, self.wav]
+        # FL 工程也进来（配置里给了 flp 才有）。**创作者会随时改 FL**
+        # （事实 F16），而那一侧我们看不见过程，只能看到导出的 wav 变了。
+        # 把 FLP 纳入快照，他的编曲工作才能被回滚 —— 否则一小时的配器
+        # 在会话树上一点痕迹都没有。
+        if self.flp:
+            out.append(self.flp)
+        return out
 
     @property
     def duration_s(self) -> float:

@@ -60,7 +60,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--lead-gain", type=float, default=0.0)
     ap.add_argument("--harmony-gain", type=float, default=-6.5)
-    ap.add_argument("--acc-gain", type=float, default=-3.0)
+    # 创作者 2026-08-25 实听《风筝线》后的判断：「歌声对比伴奏有点弱」。
+    # 从 −3 降到 −6 dB。**挖槽只解决频段打架，解决不了整体音量关系**，
+    # 所以必须动电平，不是再多挖一点。这类判断只有耳朵能下（事实 F17）。
+    ap.add_argument("--acc-gain", type=float, default=-6.0,
+                    help="伴奏轨增益 dB。默认 −6：人声要压得住伴奏")
     ap.add_argument("--no-carve", action="store_true",
                     help="不给伴奏挖人声让位槽（默认会挖，只改 .svp）")
     ap.add_argument("--clear", action="store_true", help="关掉全部 FX")

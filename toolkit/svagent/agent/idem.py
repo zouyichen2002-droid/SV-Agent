@@ -155,7 +155,14 @@ def content_stats(path: Path) -> dict:
         return {}
     if path.suffix.lower() == ".svp":
         n = normalize_svp(path)
+        # **逐轨增益也进度量。** 2026-08-25：创作者手动把主旋律推到 +4.8 dB，
+        # 我重跑一次 `mix` 就把它重置成 0 —— 而 `delta` 里一个字都没有，
+        # 因为当时只统计了音符数、调教点数这些「数量」。
+        # 增益是**值**不是数量，所以得单列。不阻止覆盖，但不许安静。
+        gains = {f"gain[{t['name']}]": (t["mixer"] or {}).get("gainDecibel")
+                 for t in n["tracks"] if t.get("mixer")}
         return {
+            **{k: v for k, v in gains.items() if v is not None},
             "notes": sum(len(t["notes"]) for t in n["tracks"]),
             "overlaps": sum(count_overlaps(t["notes"]) for t in n["tracks"]),
             "tuning_points": sum(len(v["points"]) for t in n["tracks"]
