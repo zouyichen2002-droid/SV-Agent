@@ -111,3 +111,7 @@ songs/_seg*/
 
 # 指标测试的沙盒
 songs/_metrics*/
+
+# 诊断与并行假设的沙盒
+songs/_diag*/
+songs/_trial_*/

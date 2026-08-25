@@ -164,6 +164,47 @@ def dynamics(proj: PJ.SongProject) -> list[Metric]:
         else "还没调教过 —— **不知道**，不是「很平」")]
 
 
+def expressiveness(proj: PJ.SongProject) -> list[Metric]:
+    """「机械 / 不像人」那条规则的原料：音高微调点数与调教点密度。
+
+    两个都按**每音符**算 —— 绝对点数会随歌的长短变，跨歌不可比，
+    而诊断层要拿它和别的版本对照。
+    """
+    try:
+        d = json.loads(proj.svp.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return [Metric("pitch_delta_density", "音高微调密度", None, 1.0, " 点/音符"),
+                Metric("tuning_density", "调教点密度", None, 4.0, " 点/音符")]
+    lib = {g.get("uuid"): g for g in (d.get("library") or [])}
+    n_notes, n_pd, n_all = 0, 0, 0
+    for t in (d.get("tracks") or []):
+        if not str(t.get("name", "")).startswith("主旋律"):
+            continue
+        for ref in (t.get("groups") or []):
+            g = lib.get(ref.get("groupID")) or {}
+            n_notes += len(g.get("notes") or [])
+            for name, v in (g.get("parameters") or {}).items():
+                k = len(v.get("points") or []) // 2
+                n_all += k
+                if name == "pitchDelta":
+                    n_pd += k
+            for v in (g.get("vocalModes") or {}).values():
+                n_all += len(v.get("points") or []) // 2
+    if not n_notes:
+        return [Metric("pitch_delta_density", "音高微调密度", None, 1.0, " 点/音符"),
+                Metric("tuning_density", "调教点密度", None, 4.0, " 点/音符")]
+    return [
+        Metric("pitch_delta_density", "音高微调密度", n_pd / n_notes, 0.5,
+               " 点/音符", MIN,
+               "音高全是直线，听着像机器。加 `pitchDelta` —— 滑音、颤音起振",
+               f"{n_pd} 点 / {n_notes} 音符"),
+        Metric("tuning_density", "调教点密度", n_all / n_notes, 2.5,
+               " 点/音符", MIN,
+               "整体没调教过，或者调得太稀。跑 `tune`",
+               f"{n_all} 点 / {n_notes} 音符"),
+    ]
+
+
 # =========================================================================
 # 第九项检查的数值形态
 # =========================================================================
@@ -197,7 +238,8 @@ def chord_fit(proj: PJ.SongProject) -> list[Metric]:
 def collect(proj: PJ.SongProject | None = None) -> list[Metric]:
     """指标面板读这个。**每个数都来自库里已有的函数，这里不算新东西。**"""
     proj = proj or PJ.current()
-    return contour(proj) + dynamics(proj) + chord_fit(proj)
+    return (contour(proj) + dynamics(proj)
+            + expressiveness(proj) + chord_fit(proj))
 
 
 def report(ms: list[Metric]) -> str:

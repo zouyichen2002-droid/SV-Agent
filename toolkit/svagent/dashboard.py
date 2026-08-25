@@ -38,10 +38,12 @@
 from __future__ import annotations
 
 import html
+import json
 import time
 from pathlib import Path
 
 from . import project as PJ
+from .agent import diagnose as DG
 from .agent import facts as FA
 from .agent import idem as ID
 from .agent import metrics as MT
@@ -53,7 +55,6 @@ from .agent import tree as TR
 
 # 还没建造的面板：名字 · 属于第几项 · 一句话说明。**只列，不画。**
 PENDING_PANELS = [
-    ("本轮", 5, "诊断 → 假设 → 动作 → 度量前后对比"),
 ]
 
 WHO_CLS = {ST.BY_AGENT: "agent", ST.BY_CREATOR: "creator", ST.BY_BOTH: "both"}
@@ -309,6 +310,68 @@ def _highlight(nd, depth: int) -> str:
             f'其余 {m.get("n_kept", "?")} 个逐字段不变</span>')
 
 
+def _diagnosis_panel() -> str:
+    """诊断面板（第 8 项）：三个假设并排、各自度量、选了哪个、为什么。
+
+    **读报告，不跑诊断** —— 诊断要在隔离副本里跑真动作，几十秒起步，
+    而仪表盘每次文件变动都会重新生成（第 4 项那次的教训）。
+    """
+    d = DG.load_report()
+    if not d:
+        return ('<h2>诊断　第 8 项</h2><div class="card"><div class="lamp '
+                'unknown"><span class="dot"></span><span class="ldt">'
+                '还没诊断过　—　跑 diagnose.py "副歌不够爆"</span></div></div>')
+    when = time.strftime("%m-%d %H:%M", time.localtime(d.get("ts", 0)))
+    rows = [f'<div class="fl" style="padding-left:0"><span>'
+            f'「{_e(d.get("complaint"))}」　{when}　'
+            f'意图 {_e(d.get("intent") or "认不出来")}'
+            + (f'　置信度 {d["confidence"]:.2f}'
+               if d.get("confidence") is not None else "")
+            + "</span></div>"]
+
+    if d.get("ask"):
+        # **「我不知道」要画得和结论一样显眼**，不是画成一条灰色小字。
+        rows.append(f'<div class="lamp unknown"><span class="dot"></span>'
+                    f'<span class="lnm">不猜，问你</span>'
+                    f'<span class="ldt">{_md(d["ask"])}</span></div>')
+
+    for h in d.get("hypotheses", []):
+        rows.append(f'<div class="lamp unknown"><span class="dot"></span>'
+                    f'<span class="lnm">{_e(h["layer"])}层</span>'
+                    f'<span class="ldt">{_e(h["why"])}　→ {_e(h["action"])}'
+                    f' {_e(json.dumps(h["params"], ensure_ascii=False))}'
+                    f'</span></div>')
+
+    chosen = d.get("chosen") or {}
+    for t in d.get("trials", []):
+        won = (chosen.get("metric") == t["metric"]
+               and chosen.get("action") == t["action"])
+        cls = "off" if (not t["ok"] or t["regressed"]) else ("on" if won
+                                                             else "unknown")
+        bits = []
+        if t["before"] is not None and t["after"] is not None:
+            bits.append(f'{t["metric"]} {t["before"]:g} → {t["after"]:g}'
+                        f'（{t["improvement"]:+g}）')
+        if t["regressed"]:
+            bits.append(f'**退步**：检查项 {t["findings_before"]} → '
+                        f'{t["findings_after"]}，出局')
+        if not t["ok"]:
+            bits.append(f'跑不通：{t["error"][:80]}')
+        rows.append(f'<div class="lamp {cls}"><span class="dot"></span>'
+                    f'<span class="lnm">{_e(t["layer"])}层</span>'
+                    f'<span class="ldt">{_e(t["action"])}　'
+                    f'{_md("　".join(bits))}'
+                    + (' <b class="here">← 胜出</b>' if won else "")
+                    + f'　{t["elapsed_s"]:g}s</span></div>')
+
+    if d.get("trials") and not chosen:
+        rows.append('<div class="lamp off"><span class="dot"></span>'
+                    '<span class="lnm">一个都没选</span><span class="ldt">'
+                    '没有假设达到最小改善，或者都有退步　—　'
+                    '**什么都不做**比乱改一个好</span></div>')
+    return f'<h2>诊断　第 8 项</h2><div class="card">{"".join(rows)}</div>'
+
+
 def _metrics_panel(ms) -> str:
     """指标面板（第 7 项）：每个指标的当前值、阈值、以及不达标该改哪。
 
@@ -517,6 +580,7 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5,
     if sf is not None:
         body.append(_safety_panel(sf))
     body.append(_actions_panel())
+    body.append(_diagnosis_panel())
     body.append(_metrics_panel(MT.collect(st.proj)))
     body.append(_facts_panel())
 
