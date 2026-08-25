@@ -102,6 +102,22 @@ class Session:
     def act(self, name: str, params: dict | None = None) -> TL.ToolResult:
         return TL.Runner(self.proj, budget=self.budget).run(name, params)
 
+    def ask(self, text: str, *, auto_rounds: int = 1,
+            max_actions: int = 8, client=None):
+        """**模型驱动的一轮。** 第 10 项的入口，也是最后一个前端。
+
+        它和别的方法一样只是 Session 的一个方法 —— 这正是第 9 项
+        「换 orchestrator 就是换前端」那句话的兑现。
+        """
+        from .agent import loop as LP
+        return LP.run(self, text, client=client, auto_rounds=auto_rounds,
+                      max_actions=max_actions, budget=self.budget)
+
+    def llm_usage(self) -> dict:
+        """模型用量。**读报告** —— 观察不发请求。"""
+        from . import llm as LM
+        return LM.load_usage()
+
     # ---- 诊断 --------------------------------------------------------
     def diagnose(self, complaint: str, *, floor: float = 0.5) -> DG.Diagnosis:
         return DG.diagnose(self.proj, complaint, floor=floor)

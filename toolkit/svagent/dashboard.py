@@ -45,6 +45,7 @@ from pathlib import Path
 from . import project as PJ
 from .agent import diagnose as DG
 from .agent import facts as FA
+from . import llm as LM
 from .agent import idem as ID
 from .agent import metrics as MT
 from .agent import safety as SF
@@ -308,6 +309,45 @@ def _highlight(nd, depth: int) -> str:
             f'✎ {src}{_e("　".join(bits))}　'
             f'改了 {m.get("n_replaced", "?")} 个音符，'
             f'其余 {m.get("n_kept", "?")} 个逐字段不变</span>')
+
+
+def _model_panel() -> str:
+    """模型面板（第 10 项）：本轮 token、调用次数、限流退避次数。
+
+    **读报告，不发请求。** 每分钟只有 4 次配额，仪表盘每次文件变动都会
+    重新生成 —— 让它去打接口等于把配额烧在显示上。
+    """
+    d = LM.load_usage()
+    if not d:
+        return ('<h2>模型　第 10 项</h2><div class="card"><div class="lamp '
+                'unknown"><span class="dot"></span><span class="ldt">'
+                '还没调用过模型　—　跑 sv.py ask "…"</span></div></div>')
+    when = time.strftime("%m-%d %H:%M", time.localtime(d.get("ts", 0)))
+    rows = [
+        ("模型", d.get("model", "—"), "on", "钉死日期版，`-latest` 会漂"),
+        ("调用次数", f'{d.get("calls", 0)} 次', "on", ""),
+        ("token", f'{d.get("total_tokens", 0)}'
+                  f'（入 {d.get("prompt_tokens", 0)} / '
+                  f'出 {d.get("completion_tokens", 0)}）', "on",
+         "25 万/分钟，基本用不完"),
+        ("限流退避", f'{d.get("backoffs", 0)} 次，共等 '
+                     f'{d.get("waited_s", 0):g}s',
+         "off" if d.get("backoffs") else "on",
+         "**贵的是往返，不是 token** —— 每分钟只有 "
+         f'{d.get("rpm_limit") or 4} 次请求'),
+        ("出错", f'{d.get("errors", 0)} 次',
+         "off" if d.get("errors") else "on", ""),
+    ]
+    body = "".join(
+        f'<div class="lamp {cls}"><span class="dot"></span>'
+        f'<span class="lnm">{_e(k)}</span>'
+        f'<span class="ldt">{_e(v)}</span>'
+        + (f'<span class="lhint">{_md(hint)}</span>' if hint else "")
+        + "</div>" for k, v, cls, hint in rows)
+    head = (f'<div class="fl" style="padding-left:0">'
+            f'<span>记于 {when}　服务端上限 '
+            f'{d.get("rpm_limit") or "?"} 次/分钟</span></div>')
+    return f'<h2>模型　第 10 项</h2><div class="card">{head}{body}</div>'
 
 
 def _diagnosis_panel() -> str:
@@ -581,6 +621,7 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5,
         body.append(_safety_panel(sf))
     body.append(_actions_panel())
     body.append(_diagnosis_panel())
+    body.append(_model_panel())
     body.append(_metrics_panel(MT.collect(st.proj)))
     body.append(_facts_panel())
 

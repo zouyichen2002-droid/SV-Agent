@@ -81,6 +81,12 @@ def main() -> int:
     sub.choices["facts"].add_argument(
         "--all", action="store_true", help="连 slow 与 network 一起复验")
 
+    p_ask = sub.add_parser("ask", help="模型驱动的一轮（会真的调 API）",
+                           parents=[common])
+    p_ask.add_argument("text")
+    p_ask.add_argument("--rounds", type=int, default=1)
+    p_ask.add_argument("--max-actions", type=int, default=8)
+
     p_dash = sub.add_parser("dash", help="生成仪表盘", parents=[common])
     p_dash.add_argument("--open", action="store_true")
 
@@ -154,6 +160,18 @@ def main() -> int:
         else:
             DG.save_report(d)
         _out(obj, a.json, text)
+        return 0
+
+    if a.cmd == "ask":
+        r = s.ask(a.text, auto_rounds=a.rounds, max_actions=a.max_actions)
+        obj = {"exit_reason": r.exit_reason, "final_text": r.final_text,
+               "n_actions": r.n_actions, "usage": r.usage.to_json(),
+               "steps": [{"n": x.n, "kind": x.kind, "action": x.action,
+                          "params": x.params, "error": x.error,
+                          "delta": (x.result or {}).get("delta"),
+                          "hooks": (x.result or {}).get("hooks")}
+                         for x in r.steps]}
+        _out(obj, a.json, r.report())
         return 0
 
     if a.cmd == "dash":

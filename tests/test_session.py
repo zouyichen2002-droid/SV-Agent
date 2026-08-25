@@ -108,10 +108,15 @@ def test_库暴露了下一个前端要的全部东西():
 
 def test_给模型的tools来自库而不是前端拼():
     """两个前端各拼一份 schema，迟早出现「CLI 能调、模型调不通」。"""
+    from svagent.agent import tools as TL
     tools = S.Session("xiaofeng").tools_for_model()
     assert tools and all(t["type"] == "function" for t in tools)
     names = {t["function"]["name"] for t in tools}
-    assert "gen_melody" in names and "gen_lyrics" not in names
+    assert "gen_melody" in names
+    # 不写死具体名字 —— 第 10 项把 gen_lyrics 从「待接模型」转成可用之后，
+    # 写死名字的断言就过期了。断言**规则**：没接上的一个都不许导出。
+    for a in TL.ACTIONS:
+        assert (a.name in names) == (a.status != TL.NEEDS_MODEL), a.name
 
 
 def test_诊断的序列化也在库里():

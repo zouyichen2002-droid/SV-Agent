@@ -379,8 +379,65 @@ def _a_pick(proj, p) -> dict:
 
 
 def _a_gen_lyrics(proj, p) -> dict:
-    raise ToolError("gen_lyrics 需要模型，第 10 项才接上。"
-                    "现在请在对话里让我写词，再存进 lyrics.txt")
+    """按主题生成多版歌词候选。**一次请求返回全部 N 版。**
+
+    每分钟只有 4 次请求（facts F11），所以「生成 20 版 = 发 20 次」
+    是不可行的。正确形态是次数少、每次塞满 —— 平均每次能带 62,500 tokens。
+
+    **不写文件。** 歌词是创作者拍板的东西（workflow：词 2 版给他选），
+    所以这个动作只产出候选，选哪一版、要不要改，是他的事。
+    """
+    from .. import llm as LM
+    from ..compose.lyricfile import parse
+
+    vs, _probs = parse(proj.lyrics)
+    ver = vs[next(iter(vs))] if vs else None
+    if ver is None:
+        raise ToolError(f"{proj.lyrics.name} 里没有可参照的版本，"
+                        "无法推断曲式与和声进行")
+
+    skeleton = []
+    for sec, lines in ver.sections:
+        skeleton.append(sec)
+        for text, chord in lines:
+            skeleton.append(f"  {chord}  （{len(text)} 字）")
+    n = int(p.get("n") or 2)
+
+    nl = chr(10)
+    prompt = nl.join([
+        f"主题：{p['theme']}",
+        "",
+        f"按下面的骨架写 {n} 版中文歌词。**和弦与每句字数必须原样保留**，"
+        f"只换字。字数容差 ±1。",
+        "",
+        *skeleton,
+        "",
+        "硬要求：一首歌只讲一件事；少生僻字；两段副歌要递进，"
+        "靠措辞升级不换意象；句尾押韵，一段之内韵尾统一；"
+        "多写动作少写感受。",
+        f"输出 {n} 个版本，每版以「## <字母> ｜<标题>」开头，"
+        "然后是段名与带和弦的歌词行，格式与骨架完全一致。"
+        "不要解释，不要写别的。",
+    ])
+
+    cli = LM.Mistral()
+    out = cli.chat([{"role": "system",
+                     "content": "你是中文作词者。只输出歌词，不解释。"},
+                    {"role": "user", "content": prompt}],
+                   temperature=0.9, max_tokens=4000)
+    LM.save_usage(cli.usage, cli.model)
+    # 模型爱给段名加 markdown 粗体（`**主歌1**`），而 `lyricfile` 的解析器
+    # 不认。实测第一次就撞上了。**在这里清掉**，不要让创作者手工修 ——
+    # 「产出的东西要能直接用」比「模型很听话」重要。
+    import re as _re
+    text = (out["message"].get("content") or "").strip()
+    text = _re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    blocks = [b.strip() for b in text.split("## ") if b.strip()]
+    return {"n_versions": len(blocks),
+            "candidates": ["## " + b for b in blocks],
+            "usage": cli.usage.to_json(),
+            "note": "**没有写文件。** 选中哪一版告诉我，我再写进 "
+                    f"{proj.lyrics.name}"}
 
 
 # =========================================================================
@@ -412,8 +469,9 @@ ACTIONS: list[Action] = [
            _obj({"theme": {"type": "string", "description": "一句话主题"},
                  "n": {"type": "integer", "minimum": 1, "maximum": 20}},
                 ("theme",)),
-           _a_gen_lyrics, (), True, NEEDS_MODEL,
-           "唯一真正需要语言能力的动作。第 10 项接 Mistral 之后可用"),
+           _a_gen_lyrics, (), False, READY,
+           "唯一真正需要语言能力的动作。**只产出候选，不写文件** —— "
+           "歌词由创作者拍板"),
 
     Action("gen_melody", "重新生成主旋律与和声（整首）",
            _obj({"scope": {
