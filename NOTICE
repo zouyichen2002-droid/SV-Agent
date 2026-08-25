@@ -1,0 +1,61 @@
+SV-Agent
+Copyright 2026 Yichen Zou
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+--------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS
+--------------------------------------------------------------------------
+
+The following are NOT distributed in this repository. They are listed for
+attribution and so that users know what terms apply when they obtain them
+separately.
+
+1. SynthVCopilot/synthv-agent-bridge — Apache License 2.0
+   https://github.com/SynthVCopilot/synthv-agent-bridge
+   The original MCP runtime for Synthesizer V Studio. It was the first
+   approach used by this project. Since ADR-0009 the main chain writes
+   `.svp` files directly and no longer depends on it; `toolkit/svagent/
+   bridge.py` is retained but not referenced by the main chain.
+
+2. SynthVCopilot/SKILLS — Apache License 2.0 + Commons Clause,
+   plus additional terms.
+   *Source-available, NOT open source.* Personal and internal commercial
+   use permitted; redistribution as part of a paid product is not.
+   Outputs produced with it are unrestricted.
+   Not vendored here.
+
+3. flstudio-mcp — see upstream for terms.
+   Moved off the main chain by ADR-0011 because FL Studio's scripting API
+   cannot load plugins, which every one of its mixing tools requires.
+   Not vendored here.
+
+4. Synthesizer V Studio, its voice databases, and acoustic models
+   (Dreamtonics) — proprietary, obtained and licensed by the end user.
+   Not distributed here.
+
+5. FL Studio and its bundled instruments (Image-Line) — proprietary,
+   obtained and licensed by the end user. Not distributed here.
+
+--------------------------------------------------------------------------
+CONTENT IN THIS REPOSITORY
+--------------------------------------------------------------------------
+
+`songs/*/lyrics.txt` contains original lyrics written by the copyright
+holder (with AI assistance, as recorded in each file's header). They are
+covered by the same licence as the rest of the repository.
+
+`songs/_template/empty_v196.svp` is an EMPTY Synthesizer V project — zero
+notes, no musical content. It is included solely as a structural template
+so the tooling knows the file schema. Every other `.svp`, `.wav`, `.mid`,
+and `.flp` is excluded by `.gitignore` and is not distributed.

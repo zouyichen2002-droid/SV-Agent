@@ -188,8 +188,17 @@ tests/                   212 个测试
 
 ## 许可
 
-**目前没有 LICENSE 文件 —— 也就是说仓库虽然公开，法律上仍是「保留所有权利」。**
-要真正开源需要显式加一个许可证。
+**[Apache License 2.0](LICENSE)** — 你可以自由使用、修改、分发，
+包括商用；条件是保留版权与许可声明，并注明改动。
+选它而不是 MIT，是因为它多一条**明确的专利授权**，
+这对想拿去用的团队更省事。
 
-第三方组件保留各自条款：`synthv-agent-bridge` 是 Apache-2.0；
-`SynthVCopilot/SKILLS` 是 Apache-2.0 + Commons Clause（**source-available，不是开源**）。
+第三方组件与本仓库内容的归属见 [`NOTICE`](NOTICE)。三件要点：
+
+- **上游 `synthv-agent-bridge`（Apache-2.0）已不在主链路** —— ADR-0009 之后直写 `.svp`
+- `SynthVCopilot/SKILLS` 是 **source-available，不是开源**（Apache-2.0 + Commons Clause）。**未内置在此**
+- SynthV / FL Studio 本体、声库、声学模型都是专有软件，**由使用者自行获取**，此处不分发
+
+`songs/*/lyrics.txt` 是版权持有人的原创歌词（AI 参与程度记在每份文件头部），
+与代码同一许可。`songs/_template/empty_v196.svp` 是**零音符的空工程**，
+只作为文件结构模板；其余 `.svp` / `.wav` / `.mid` / `.flp` 全部被 `.gitignore` 排除。
