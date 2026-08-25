@@ -131,6 +131,18 @@ def semantic_digest(path: Path) -> str | None:
     return hashlib.blake2b(blob.encode(), digest_size=16).hexdigest()
 
 
+def count_overlaps(notes) -> int:
+    """同一条轨里前一个音符还没结束、后一个就开始了的次数。
+
+    **唯一的实现。** SynthV 不支持同轨重叠（facts F03），
+    `state.inspect` 与写后钩子都调它 —— 两处各写一遍必然出现
+    「一边说 0 一边说 57」而且两边都不报错。
+    """
+    srt = sorted(notes, key=lambda n: n["onset"])
+    return sum(1 for a, b in zip(srt, srt[1:])
+               if a["onset"] + a["duration"] > b["onset"])
+
+
 def content_stats(path: Path) -> dict:
     """产物里有多少**实质内容**。用来防止幂等测试空洞地通过。
 
@@ -145,6 +157,7 @@ def content_stats(path: Path) -> dict:
         n = normalize_svp(path)
         return {
             "notes": sum(len(t["notes"]) for t in n["tracks"]),
+            "overlaps": sum(count_overlaps(t["notes"]) for t in n["tracks"]),
             "tuning_points": sum(len(v["points"]) for t in n["tracks"]
                                  for v in t["params"].values()),
             "audio_tracks": sum(1 for t in n["tracks"] if t["audio"]),

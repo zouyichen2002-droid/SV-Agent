@@ -184,9 +184,10 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
     else:
         ln = _notes_of(lead, lib)
         Q = 705600000
-        srt = sorted(ln, key=lambda n: n["onset"])
-        ov = sum(1 for a, b in zip(srt, srt[1:])
-                 if a["onset"] + a["duration"] > b["onset"])
+        # 重叠数由 idem.count_overlaps 算 —— **一个实现**。原来这里内联了
+        # 一遍，写后钩子那边又要一遍，迟早出现「一边说 0 一边说 57」。
+        from .idem import count_overlaps
+        ov = count_overlaps(ln)
         mx = max((n["duration"] / Q for n in ln), default=0)
         s3.evidence.append(f"{lead['name']}　{len(ln)} 音符"
                            f"　同轨重叠 {ov}　最长音 {mx:.2f} 拍")

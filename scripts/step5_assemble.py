@@ -108,6 +108,49 @@ def sine_render(parts, bpm: float, n_bars: int) -> np.ndarray:
     return y
 
 
+def align_report(bpm: float) -> dict:
+    """对齐的全部数字，一次算完。→ dict。
+
+    **这是唯一的实现。** `main()` 用它打印，agent 的 `verify_alignment`
+    动作也用它 —— 两个入口各自组装同一条管线，必然产出两个不同的数字
+    而且两边都不报错（`eval/line_offset.py` 与 `make_listening_checks.py`
+    那次就是 0.340 vs 0.360）。
+    """
+    y, sr = sf.read(str(AUDIO), always_2d=True)
+    mono = y.mean(axis=1).astype(np.float32)
+    _lead, _notes, _k, parts = parts_of_project(bpm)
+
+    meas, spf = onset_envelope(mono, sr)
+    exp = expected_env(parts, len(meas), spf, bpm)
+    raw, cor = best_lag(exp, meas, spf)
+
+    # 自校准：同一套事件的正弦渲染，构造上样本级对齐
+    cal = sine_render(parts, bpm, S3.N_BARS)
+    cmeas, cspf = onset_envelope(cal.astype(np.float32), SR)
+    cexp = expected_env(parts, len(cmeas), cspf, bpm)
+    bias, bcor = best_lag(cexp, cmeas, cspf)
+    lag = raw - bias
+
+    third = len(meas) // 3
+    seg = []
+    for i in range(3):
+        s0, s1 = i * third, (i + 1) * third
+        L, c = best_lag(exp[s0:s1], meas[s0:s1], spf)
+        seg.append((L - bias, c))
+    spread = max(s[0] for s in seg) - min(s[0] for s in seg)
+
+    return {
+        "offset_ms": round(lag, 2), "raw_ms": round(raw, 2),
+        "bias_ms": round(bias, 2), "corr": round(cor, 3),
+        "bias_corr": round(bcor, 3),
+        "segments_ms": [round(s[0], 2) for s in seg],
+        "spread_ms": round(spread, 2),
+        "duration_s": round(len(mono) / sr, 2),
+        "n_events": sum(len(v) for v in parts.values()),
+        "ok": abs(lag) <= WARN_MS and spread <= DRIFT_OK_MS and cor >= 0.15,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bpm", type=float, default=S3.SONG_BPM)
@@ -135,16 +178,10 @@ def main() -> int:
     print("=" * 70)
     print("对齐验证")
     print("=" * 70)
-    meas, spf = onset_envelope(mono, sr)
-    exp = expected_env(parts, len(meas), spf, a.bpm)
-    raw, cor = best_lag(exp, meas, spf)
-
-    # 自校准：同一套事件的正弦渲染，构造上样本级对齐
-    cal = sine_render(parts, a.bpm, S3.N_BARS)
-    cmeas, cspf = onset_envelope(cal.astype(np.float32), SR)
-    cexp = expected_env(parts, len(cmeas), cspf, a.bpm)
-    bias, bcor = best_lag(cexp, cmeas, cspf)
-    lag = raw - bias
+    rep = align_report(a.bpm)          # **唯一的实现**，agent 用的是同一个
+    raw, cor, bias, bcor = (rep["raw_ms"], rep["corr"],
+                            rep["bias_ms"], rep["bias_corr"])
+    lag = rep["offset_ms"]
 
     print(f"  原始互相关　{raw:+.1f} ms（相关峰 {cor:.3f}）")
     print(f"  检测器偏置　{bias:+.1f} ms（正弦渲染自校准，相关峰 {bcor:.3f}）")
@@ -161,14 +198,9 @@ def main() -> int:
         print("    ⚠ 相关峰很低，这个数字不可信")
 
     print("\n  分段（判断是偏移还是漂移）：")
-    third = len(meas) // 3
-    seg = []
-    for i, nm in enumerate(("前 1/3", "中 1/3", "后 1/3")):
-        s0, s1 = i * third, (i + 1) * third
-        L, c = best_lag(exp[s0:s1], meas[s0:s1], spf)
-        seg.append(L)
-        print(f"    {nm}　{L - bias:+7.1f} ms（相关峰 {c:.3f}）")
-    spread = max(seg) - min(seg)
+    for nm, v in zip(("前 1/3", "中 1/3", "后 1/3"), rep["segments_ms"]):
+        print(f"    {nm}　{v:+7.1f} ms")
+    spread = rep["spread_ms"]
     print(f"\n  三段极差 {spread:.1f} ms")
     if spread <= DRIFT_OK_MS:
         print("    ✓ 无漂移 —— tempo 一致")

@@ -47,6 +47,7 @@ from .agent import idem as ID
 from .agent import safety as SF
 from .agent import safewrite as SW
 from .agent import state as ST
+from .agent import tools as TL
 from .agent import tree as TR
 
 # 还没建造的面板：名字 · 属于第几项 · 一句话说明。**只列，不画。**
@@ -376,30 +377,47 @@ def _actions_panel() -> str:
     """
     rep = ID.load_report()
     if not rep:
-        return ('<h2>动作表　第 2 项</h2><div class="card"><div class="lamp '
-                'unknown"><span class="dot"></span><span class="ldt">'
-                '还没跑过幂等测试</span></div></div>')
-    stale = ID.report_is_stale(rep)
-    when = time.strftime("%m-%d %H:%M",
-                         time.localtime(max(v["ts"] for v in rep.values())))
-    head = (f'<div class="lamp {"off" if stale else "on"}">'
-            f'<span class="dot"></span><span class="lnm">测于 {when}</span>'
-            f'<span class="ldt">'
-            + ("代码在这之后改过 —— 下面这些 ✓ 已经不算数了，重跑 "
-               "pytest tests/test_idempotence.py" if stale
-               else "这是最新代码的结果")
-            + "</span></div>")
+        head = ('<div class="lamp unknown"><span class="dot"></span>'
+                '<span class="lnm">幂等未测</span><span class="ldt">'
+                '跑 pytest tests/test_idempotence.py</span></div>')
+    else:
+        stale = ID.report_is_stale(rep)
+        when = time.strftime("%m-%d %H:%M",
+                             time.localtime(max(v["ts"] for v in rep.values())))
+        head = (f'<div class="lamp {"off" if stale else "on"}">'
+                f'<span class="dot"></span>'
+                f'<span class="lnm">幂等测于 {when}</span>'
+                f'<span class="ldt">'
+                + ("代码在这之后改过 —— 幂等那一列已经不算数，重跑 "
+                   "pytest tests/test_idempotence.py" if stale
+                   else "幂等这一列是最新代码的结果")
+                + "</span></div>")
+    # 第 5 项之后这张表以**动作池**为主键，幂等报告只是其中一列。
+    # 幂等测的是步骤脚本，动作是它们的封装 —— 一个动作没有对应的幂等记录
+    # 不代表它不幂等，所以那一列缺失时标「—」，不标红。
+    badge = {TL.READY: ("on", "可用"), TL.PARTIAL: ("unknown", "部分"),
+             TL.NEEDS_MODEL: ("unknown", "待接模型")}
     rows = []
-    for name, v in rep.items():
-        s = v["stats"]
-        got = "　".join(f"{k}={s[k]}" for k in s if s[k])
+    for act in TL.ACTIONS:
+        cls, word = badge[act.status]
+        idem = rep.get(act.script) if act.script else None
+        bits = [word]
+        bits.append("只读" if not act.writes else "写")
+        bits.append("钩子 " + ("、".join(act.hooks) if act.hooks else "无"))
+        if idem is not None:
+            bits.append("幂等 " + ("✓" if idem["ok"] else "✗"))
         rows.append(
-            f'<div class="lamp {"on" if v["ok"] else "off"}">'
-            f'<span class="dot"></span><span class="lnm">{_e(name)}</span>'
-            f'<span class="ldt">{_e(v["desc"])}　{_e(got)}</span>'
-            + (f'<span class="lhint">→ {_e(v["detail"])}</span>'
-               if v.get("detail") else "") + "</div>")
-    return f'<h2>动作表　第 2 项</h2><div class="card">{head}{"".join(rows)}</div>'
+            f'<div class="lamp {cls}"><span class="dot"></span>'
+            f'<span class="lnm mono">{_e(act.name)}</span>'
+            f'<span class="ldt">{_md(act.desc)}　·　{_e(" · ".join(bits))}</span>'
+            + (f'<span class="lhint">{_md(act.note)}</span>' if act.note else "")
+            + "</div>")
+    n_ready = sum(1 for a in TL.ACTIONS if a.status == TL.READY)
+    lead = (f'<div class="fl" style="padding-left:0"><span>'
+            f'{len(TL.ACTIONS)} 个动作　{n_ready} 个完全可用　'
+            f'导给模型 {len(TL.to_mistral_tools())} 个</span></div>')
+    return (f'<h2>动作表　第 5 项</h2><div class="card">'
+            f'{lead}{head}{"".join(rows)}</div>')
 
 
 def render(st: ST.ProjectState, *, refresh_s: int = 5,

@@ -299,6 +299,42 @@ def write_project(a, lead_name, lead_notes, lead_sections,
     return 0 if allok else 3
 
 
+def parse_register_shift(s: str) -> dict[str, int]:
+    """`"+3"` → 全段 +3；`"副歌=+3,主歌=-2"` → 按段。空串 → 不动。
+
+    `""` 是**默认值**，必须解析成「什么都不做」—— 这个开关是给 agent 的
+    `adjust_spec` 用的，绝大多数调用不会带它，不许因此改变既有行为。
+    """
+    s = (s or "").strip()
+    if not s:
+        return {}
+    if "=" not in s:
+        return {"*": int(s)}
+    out = {}
+    for part in s.split(","):
+        k, _, v = part.partition("=")
+        out[k.strip()] = int(v)
+    return out
+
+
+def apply_register_shift(sp, shift: dict[str, int]) -> None:
+    """就地改规格的音区。**不许越出声库舒适音域** —— 越界了唱不上去。
+
+    星尘的舒适音域 MIDI 57–78（A3–F#5）。夹取而不是拒绝：
+    创作者说「再高一点」时，给他能唱的最高，比报错有用。
+    """
+    if not shift:
+        return
+    lo_cap, hi_cap = 57, 78
+    for sec, (lo, hi) in list(sp.register.items()):
+        d = shift.get(sec, shift.get("*", 0))
+        if not d:
+            continue
+        span = hi - lo
+        nlo = max(lo_cap, min(lo + d, hi_cap - span))
+        sp.register[sec] = (nlo, nlo + span)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--specs", type=int, default=24,
@@ -312,6 +348,9 @@ def main() -> int:
                     help="和声覆盖哪些段落，逗号分隔（按段名前缀匹配）")
     ap.add_argument("--keep-melody", action="store_true",
                     help="保留工程里现有的主旋律，只重做和声（局部修改）")
+    ap.add_argument("--register-shift", default="",
+                    help="音区整体或按段偏移半音，如 \"+3\" 或 \"副歌=+3,主歌=-2\"。"
+                         "「副歌太平」最直接对应的旋钮（agent 的 adjust_spec 用它）")
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--closed", action="store_true",
                     help="确认已在 SynthV 里关闭该工程。**没有它不会写盘**")
@@ -346,9 +385,14 @@ def main() -> int:
         return write_project(a, lead_name, lead_notes, lead_sections,
                              kr, kq, cfg)
 
+    shift = parse_register_shift(a.register_shift)
+    if shift:
+        print(f"音区偏移　{a.register_shift}")
+
     pool = []
     for si, sp in enumerate(expand_many("晓风残月", a.specs)):
         sp.bpm = a.bpm
+        apply_register_shift(sp, shift)
         for sd in range(a.seeds):
             rng = random.Random(si * 1000 + sd)
             rate = 0.0 if sd == 0 else (0.25 if sd == 1 else 0.45)
