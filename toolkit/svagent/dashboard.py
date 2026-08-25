@@ -42,6 +42,7 @@ import time
 from pathlib import Path
 
 from . import project as PJ
+from .agent import facts as FA
 from .agent import idem as ID
 from .agent import safety as SF
 from .agent import safewrite as SW
@@ -164,10 +165,14 @@ label.auto { cursor: pointer; user-select: none; }
 .lamp.off .dot { background: var(--block); }
 .lamp.unknown .dot { background: transparent; border: 1px solid var(--fg3); }
 .lnm { font-weight: 500; min-width: 74px; color: var(--fg); }
+.ldt code, .lhint code { font-size: 12px; padding: 0 3px;
+        border-radius: 3px; background: var(--wait-bg); }
+.ldt b, .lhint b { font-weight: 500; color: var(--fg); }
 .ldt { color: var(--fg2); }
 .lamp.off .ldt { color: var(--block); }
 b.here { font-weight: 500; color: var(--accent); margin-left: 10px; }
 .lhint { flex: 1 1 100%; padding-left: 93px; color: var(--fg3);
+         word-break: break-word;
          font-size: 12.5px; }
 .fl { display: flex; gap: 8px; font-size: 12.5px; padding: 2px 0 2px 93px;
       color: var(--fg3); }
@@ -226,6 +231,18 @@ def _e(s) -> str:
     return html.escape(str(s), quote=True)
 
 
+def _md(s) -> str:
+    """把 `**粗体**` 和 反引号代码 渲染成 HTML。
+
+    **先转义再替换** —— 顺序反了就等于把库里的文本当 HTML 执行。
+    纯排版，不是计算：这里不改变任何值，只决定它长什么样。
+    """
+    import re
+    out = _e(s)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
+    return re.sub(r"`(.+?)`", r'<code class="mono">\1</code>', out)
+
+
 def _cmd_block(cmd: str) -> str:
     return (f'<div class="cmd"><code>{_e(cmd)}</code>'
             f'<button class="copy" type="button">复制</button></div>')
@@ -259,8 +276,8 @@ def _safety_panel(sf: SF.SafetyState) -> str:
         rows.append(
             f'<div class="lamp {l.color}"><span class="dot"></span>'
             f'<span class="lnm">{_e(l.name)}</span>'
-            f'<span class="ldt">{_e(l.detail)}</span>'
-            + (f'<span class="lhint">→ {_e(l.hint)}</span>' if l.hint else "")
+            f'<span class="ldt">{_md(l.detail)}</span>'
+            + (f'<span class="lhint">→ {_md(l.hint)}</span>' if l.hint else "")
             + "</div>")
         # 哈希那一项要逐文件摊开 —— 只说「1 个文件被改了」还得去猜是哪个
         if l.name == "哈希校验":
@@ -319,6 +336,36 @@ def _tree_panel(t: TR.Tree) -> str:
             f'　{bad} 个被否决（否决记忆的原料）</span></div>')
     return (f'<h2>会话树　第 3 项</h2><div class="card">'
             f'{dirty}{"".join(rows)}{foot}</div>')
+
+
+def _facts_panel() -> str:
+    """约束清单（第 4 项）。**能自动复验的当场复验，不能的老实标出来。**
+
+    **这里不跑复验**，只读 `scripts/facts.py` 落下的报告。
+
+    面板一开始是现跑的，被 `test_渲染是纯函数` 抓了 —— 复验结果本身会变
+    （mtime 碰撞率每次不同），渲染就不再是状态的纯函数。而且监视模式下
+    每秒重渲一次意味着每秒 spawn 三个子进程。**前端只渲染，不计算。**
+    """
+    rs = FA.results_from_report()
+    s = FA.summary(rs)
+    d = FA.load_report()
+    when = (time.strftime("%m-%d %H:%M", time.localtime(d["ts"]))
+            if d.get("ts") else "从未")
+    rows = []
+    for r in rs:
+        rows.append(
+            f'<div class="lamp {r.color}"><span class="dot"></span>'
+            f'<span class="lnm mono">{_e(r.fact.id)}</span>'
+            f'<span class="ldt">{_md(r.fact.claim)}</span>'
+            f'<span class="lhint">{_md(r.fact.matters)}'
+            f'　—　{_e(r.detail)}</span></div>')
+    head = (f'{s["total"]} 条　复验于 {when}　{s["verified"]} 条通过 · '
+            f'{s["failed"]} 条失败 · {s["skipped"]} 条跳过（slow/network）· '
+            f'{s["unverifiable"]} 条只有出处')
+    return (f'<h2>约束清单　第 4 项</h2><div class="card">'
+            f'<div class="fl" style="padding-left:0"><span>{head}</span></div>'
+            f'{"".join(rows)}</div>')
 
 
 def _actions_panel() -> str:
@@ -406,6 +453,7 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5,
     if sf is not None:
         body.append(_safety_panel(sf))
     body.append(_actions_panel())
+    body.append(_facts_panel())
 
     body += [
         '<div class="pending">',
