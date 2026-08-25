@@ -229,6 +229,19 @@ class Tree:
             raise TreeError("label 不能为空")
         self._append({"amend": nid, "label": text.strip()})
 
+    def annotate(self, nid: str, **fields) -> None:
+        """给节点补记信息（度量、改动高亮等）。**同样是追加修订，不改写历史。**
+
+        动作执行时节点必须先建好（否则失败了就没东西可回退），
+        但「改完之后的度量」要等动作跑完才有 —— 所以补记。
+        """
+        self.node(nid)
+        allowed = {"metrics_after", "spec_snapshot", "params", "label"}
+        bad = set(fields) - allowed
+        if bad:
+            raise TreeError(f"不允许补记这些字段：{sorted(bad)}")
+        self._append({"amend": nid, **fields})
+
     def verdict(self, nid: str, v: str, note: str = "") -> None:
         """记录裁决。**这是否决记忆的写入口。**"""
         self.node(nid)

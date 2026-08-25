@@ -105,3 +105,6 @@ songs/_tree*/
 
 # 工具层测试的沙盒
 songs/_tools*/
+
+# 段落测试的沙盒
+songs/_seg*/

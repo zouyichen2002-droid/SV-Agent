@@ -173,15 +173,39 @@ def _script(name: str, args: list[str], proj) -> tuple[int, str]:
     return r.returncode, out
 
 
+def _changed_report(proj, before) -> dict:
+    """改动高亮：拿动作前后的音符表现算，不解析脚本输出。"""
+    from ..compose.lyricfile import parse
+    from . import segments as SG
+    try:
+        _n, after = _lead_notes_of(proj.svp)
+        vs, _probs = parse(proj.lyrics)
+        rep = SG.diff_sections(before, after, vs[next(iter(vs))], proj.form)
+    except Exception:
+        return {}
+    if not rep.sections:
+        return {}
+    return {"sections": rep.sections, "bars": rep.bars,
+            "n_replaced": rep.n_replaced, "n_kept": rep.n_kept,
+            "span_delta_beats": rep.span_delta_beats}
+
+
 def _a_gen_melody(proj, p) -> dict:
+    try:
+        _n, before = _lead_notes_of(proj.svp)
+    except ToolError:
+        before = []
     args = ["--write", "--closed"]
+    scope = p.get("scope")
+    if isinstance(scope, list) and scope:
+        args += ["--sections", ",".join(scope)]
     for k, flag in (("specs", "--specs"), ("seeds", "--seeds")):
         if p.get(k) is not None:
             args += [flag, str(p[k])]
     if p.get("bpm") is not None:
         args += ["--bpm", str(p["bpm"])]
     _rc, out = _script("step3_melody", args, proj)
-    return {"stdout_tail": out[-800:]}
+    return {"stdout_tail": out[-800:], **_changed_report(proj, before)}
 
 
 def _a_gen_harmony(proj, p) -> dict:
@@ -290,6 +314,70 @@ def _a_set_mixer_param(proj, p) -> dict:
             "notes_unchanged": True}
 
 
+def _lead_notes_of(svp_path: Path) -> tuple[str, list[dict]]:
+    from .. import svp_build as SB
+    back = SB.read_back(svp_path)
+    name = next((k for k in back if k.startswith("主旋律")), None)
+    if name is None:
+        raise ToolError(f"{svp_path.name} 里没有「主旋律」轨")
+    return name, sorted(back[name], key=lambda n: n["onset"])
+
+
+def _a_pick(proj, p) -> dict:
+    """**cherry-pick**：把另一个节点某几个段落的音符取过来。
+
+    架构文档 §6.5：「回到上一版的副歌，但保留现在的调教」听起来像 merge，
+    但**不是** —— 我们的状态是结构化的（音符按段落组织），
+    所以只需要「取节点 X 的第 N 段」，语义明确、不会冲突。
+    这是相对 coding agent 的一处优势：代码没有天然的段落边界，歌有。
+    """
+    import tempfile
+    from ..compose.lyricfile import parse
+    from . import segments as SG
+
+    t = TR.Tree(proj)
+    nd = t.node(p["from_node"])
+    m = t.store.load(nd.checkpoint)
+    rec = m.files.get(str(proj.svp))
+    if not rec or not rec["hash"]:
+        raise ToolError(f"{nd.id} 的快照里没有工程文件")
+    blob = t.store._blob_path(rec["hash"])
+
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d) / "src.svp"
+        tmp.write_bytes(blob.read_bytes())
+        _sname, src_notes = _lead_notes_of(tmp)      # 与主路径同一个读法
+    lead_name, cur_notes = _lead_notes_of(proj.svp)
+
+    vs, _probs = parse(proj.lyrics)
+    ver = vs[next(iter(vs))]
+    scope = list(p["sections"])
+    merged, rep = SG.splice(cur_notes, src_notes, scope, ver, proj.form)
+    if not SG.unchanged_outside(cur_notes, merged, scope, ver):
+        raise ToolError("点名之外的段落被改动了 —— 这是 bug，没有写盘")
+
+    # **就地改音符，其余字段一个不碰** —— 调教曲线、混音、别的轨都保留。
+    d = json.loads(proj.svp.read_text(encoding="utf-8-sig"))
+    lib = {g.get("uuid"): g for g in (d.get("library") or [])}
+    track = next(t_ for t_ in d["tracks"] if t_["name"] == lead_name)
+    groups = track.get("groups") or []
+    if len(groups) != 1:
+        raise ToolError(f"「{lead_name}」有 {len(groups)} 个音符组，"
+                        f"pick 目前只处理单组")
+    g = lib[groups[0]["groupID"]]
+    if len(g["notes"]) != len(merged):
+        raise ToolError("音符数对不上，拒绝写")
+    g["notes"] = merged
+
+    SW.Guard(proj.agent_dir / "ledger.json").write(
+        proj.svp, json.dumps(d, ensure_ascii=False).encode("utf-8"))
+    return {"from_node": nd.id, "from_label": nd.label,
+            "sections": rep.sections, "n_replaced": rep.n_replaced,
+            "n_kept": rep.n_kept, "bars": rep.bars,
+            "span_delta_beats": rep.span_delta_beats,
+            "note": "调教曲线按时间锚定，会留在原处 —— 换了旋律通常要重跑 tune"}
+
+
 def _a_gen_lyrics(proj, p) -> dict:
     raise ToolError("gen_lyrics 需要模型，第 10 项才接上。"
                     "现在请在对话里让我写词，再存进 lyrics.txt")
@@ -328,12 +416,17 @@ ACTIONS: list[Action] = [
            "唯一真正需要语言能力的动作。第 10 项接 Mistral 之后可用"),
 
     Action("gen_melody", "重新生成主旋律与和声（整首）",
-           _obj({"scope": {"type": "string", "enum": ["全曲"]},
+           _obj({"scope": {
+                     "type": "array", "items": {"type": "string"},
+                     "description": '要重生成的段落，按段名前缀匹配，'
+                                    '如 ["副歌"] 命中副歌1与副歌2。'
+                                    '留空 = 整首重生成'},
                  "bpm": {"type": "number", "minimum": 40, "maximum": 200},
                  "specs": {"type": "integer", "minimum": 1, "maximum": 64},
                  "seeds": {"type": "integer", "minimum": 1, "maximum": 8}}),
-           _a_gen_melody, ("checks", "overlap", "state"), True, PARTIAL,
-           "只支持 scope=全曲。**段落级是第 6 项** —— 局部修改是归因的前提", script="step3_melody"),
+           _a_gen_melody, ("checks", "overlap", "state"), True, READY,
+           "给了 scope 就**只重生成那些段落，其余逐字段不变** —— "
+           "局部修改是归因的前提", script="step3_melody"),
 
     Action("gen_harmony", "保留主旋律，只重做和声轨",
            _obj({"kind": {"type": "array", "minItems": 1,
@@ -385,6 +478,16 @@ ACTIONS: list[Action] = [
            _obj({"node_id": {"type": "string",
                              "description": "如 n0003"}}, ("node_id",)),
            _a_revert, ("checks", "overlap", "state"), True),
+
+    Action("pick", "从会话树的另一个节点取某几个段落的音符（cherry-pick）",
+           _obj({"from_node": {"type": "string", "description": "如 n0003"},
+                 "sections": {"type": "array", "minItems": 1,
+                              "items": {"type": "string"},
+                              "description": '如 ["副歌"]'}},
+                ("from_node", "sections")),
+           _a_pick, ("checks", "overlap", "state"), True, READY,
+           "就地改音符，**调教/混音/别的轨一个字段都不碰**。"
+           "调教按时间锚定会留在原处，换了旋律通常要重跑 tune"),
 
     Action("set_mixer_param", "窄逃生口：只改某条轨的混音器参数，碰不到音符",
            _obj({"track": {"type": "string"},
@@ -547,7 +650,10 @@ class Runner:
 
         # ---- 执行 ---------------------------------------------------
         try:
-            res.extra = act.run(self.proj, params) or {}
+            out = act.run(self.proj, params)
+            # 动作返回了别的东西不该把执行器搞崩 —— 它已经写完文件了，
+            # 崩在这里就等于「写了但没记账、没跑钩子」。
+            res.extra = out if isinstance(out, dict) else {}
             res.ok = True
         except ToolError as e:
             res.error = str(e)
@@ -570,6 +676,14 @@ class Runner:
 
         res.metrics_after = measure(self.proj, deep=self.deep_metrics)
         res.delta = delta_of(res.metrics_before, res.metrics_after)
+        if res.node:
+            # 度量与改动高亮要等动作跑完才有，所以补记到节点上。
+            # 节点本身必须在动作**之前**就建好 —— 否则失败了没东西可回退。
+            after = dict(res.metrics_after)
+            for k in ("sections", "bars", "n_replaced", "n_kept", "from_node"):
+                if k in res.extra:
+                    after[k] = res.extra[k]
+            tree.annotate(res.node, metrics_after=after)
         res.elapsed_s = time.monotonic() - t0
         if res.ok and self.budget is not None:
             self.budget.spend()

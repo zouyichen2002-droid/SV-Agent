@@ -157,6 +157,16 @@ def read_lead(project: Path, ver, form):
     notes = [Note(i, n["onset"] / Q, n["duration"] / Q, int(n["pitch"]),
                   str(n["lyrics"])) for i, n in enumerate(raw)]
 
+    return lead_name, notes, sections_from(notes, ver, form)
+
+
+def sections_from(notes, ver, form):
+    """（音符表, 歌词版本, 曲式）→ melodize 那种 SECTIONS 形状。
+
+    **抽出来是因为局部重生成（`--sections`）也要用它**：拼接之后音符变了，
+    段落结构得按新音符重建。原来内联在 `read_lead` 里，
+    拼接那条路就得再写一遍 —— 又一次「两个实现」。
+    """
     bar_of, bar = {}, 0
     for name, nb in form:
         bar_of[name] = bar
@@ -169,7 +179,7 @@ def read_lead(project: Path, ver, form):
             for ch in text:
                 if idx >= len(notes):
                     raise SystemExit(
-                        f"工程里只有 {len(notes)} 个音符，"
+                        f"音符只有 {len(notes)} 个，"
                         f"歌词需要 {ver.n_chars} 个 —— 两者不同源")
                 n = notes[idx]
                 syls.append((ch, n.midi, n.duration_beats))
@@ -177,8 +187,8 @@ def read_lead(project: Path, ver, form):
             sec_lines.append((text, syls, chord))
         sections.append((sec_name, bar_of.get(sec_name, 0), sec_lines))
     if idx != len(notes):
-        print(f"  ⚠ 工程里 {len(notes)} 个音符，歌词只用掉 {idx} 个")
-    return lead_name, notes, sections
+        print(f"  ⚠ 音符 {len(notes)} 个，歌词只用掉 {idx} 个")
+    return sections
 
 
 def synthv_running() -> bool:
@@ -222,6 +232,80 @@ def gate_before_write(a) -> str | None:
                 "也请先退出 SynthV —— 它内存里的旧内容有可能被保存回去，"
                 "覆盖掉我刚写的。确实要写就加 --force-write。")
     return None
+
+
+def carry_over(b, old_path: Path) -> list[str]:
+    """把上游步骤的成果搬进新工程：**音频轨 · 混音 · 没变的轨的调教**。
+
+    ## 为什么必须有
+
+    这个函数从**空模板**重建工程。没有搬运的话，一次「只重生成副歌」
+    会把第 4/5/6 步的全部成果冲掉：伴奏音频轨消失、调教归零、混音回默认。
+    而工程照样能打开、照样能唱 —— 又一个安静的破坏。
+    实测就是这么被第 6 项的测试抓到的。
+
+    ## 调教按音符走
+
+    **只有音符逐字段没变的轨才保留调教。** 曲线是按时间锚定的，
+    音符换了还留着，等于把颤音挂在错的字上 —— 比丢了更难发现。
+    """
+    import json
+    try:
+        old = json.loads(Path(old_path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+
+    def notes_of(proj, track):
+        lib = {g.get("uuid"): g for g in (proj.get("library") or [])}
+        out = []
+        for ref in (track.get("groups") or []):
+            out += (lib.get(ref.get("groupID")) or {}).get("notes") or []
+        return sorted(out, key=lambda n: n["onset"])
+
+    def params_of(proj, track):
+        lib = {g.get("uuid"): g for g in (proj.get("library") or [])}
+        for ref in (track.get("groups") or []):
+            g = lib.get(ref.get("groupID")) or {}
+            if g.get("parameters") or g.get("vocalModes"):
+                return g.get("parameters"), g.get("vocalModes")
+        return None, None
+
+    old_by_name = {t.get("name"): t for t in (old.get("tracks") or [])}
+    new_lib = {g.get("uuid"): g for g in (b.proj.get("library") or [])}
+    log = []
+
+    for t in b.proj.get("tracks") or []:
+        o = old_by_name.get(t.get("name"))
+        if o is None:
+            continue
+        if o.get("mixer"):
+            t["mixer"] = o["mixer"]
+            log.append(f"搬回混音　{t['name']}")
+        pa, vm = params_of(old, o)
+        if not (pa or vm):
+            continue
+        if notes_of(old, o) == notes_of(b.proj, t):
+            for ref in (t.get("groups") or []):
+                g = new_lib.get(ref.get("groupID"))
+                if g is None:
+                    continue
+                if pa:
+                    g["parameters"] = pa
+                if vm:
+                    g["vocalModes"] = vm
+            n = sum(len(v.get("points") or []) // 2
+                    for v in (pa or {}).values())
+            log.append(f"搬回调教　{t['name']}　{n} 点（音符没变）")
+        else:
+            log.append(f"丢弃调教　{t['name']}　音符变了，曲线会挂在错的字上")
+
+    new_names = {t.get("name") for t in (b.proj.get("tracks") or [])}
+    for o in (old.get("tracks") or []):
+        if ((o.get("mainRef") or {}).get("isInstrumental")
+                and o.get("name") not in new_names):
+            b.proj["tracks"].append(o)
+            log.append(f"搬回音频轨　{o.get('name')}")
+    return log
 
 
 def write_project(a, lead_name, lead_notes, lead_sections,
@@ -276,6 +360,8 @@ def write_project(a, lead_name, lead_notes, lead_sections,
         b.add_vocal(f"和声_{kind}",
                     [SB.note(n.onset_beats, n.duration_beats, n.midi, n.lyric)
                      for n in hn], voice=SB.VOICE_STARDUST, gain_db=-5.0)
+    for line in carry_over(b, PROJECT):
+        print("  " + line)
     saved = b.save(PROJECT, force=True)
     print(f"工程写出　{saved}　{saved.stat().st_size} B"
           f"　{len(b.proj['tracks'])} 条轨")
@@ -348,6 +434,10 @@ def main() -> int:
                     help="和声覆盖哪些段落，逗号分隔（按段名前缀匹配）")
     ap.add_argument("--keep-melody", action="store_true",
                     help="保留工程里现有的主旋律，只重做和声（局部修改）")
+    ap.add_argument("--sections", default="",
+                    help="**只重生成这些段落**，其余逐字段不变（按段名前缀匹配）。"
+                         "局部修改是归因的前提 —— 整首重生成之后无法判断"
+                         "改善来自哪一处")
     ap.add_argument("--register-shift", default="",
                     help="音区整体或按段偏移半音，如 \"+3\" 或 \"副歌=+3,主歌=-2\"。"
                          "「副歌太平」最直接对应的旋钮（agent 的 adjust_spec 用它）")
@@ -389,10 +479,22 @@ def main() -> int:
     if shift:
         print(f"音区偏移　{a.register_shift}")
 
+    # 局部重生成必须**锁在现有旋律的调上**。候选是按自己的调生成的，
+    # 把 G 小调的副歌拼进 D 小调的歌，结果是满屏 scale finding ——
+    # 实测第一版就是这样，13 个调外音，写后钩子当场抓到。
+    lock_key = None
+    if a.sections:
+        _ln, _lnotes, _ls = read_lead(PROJECT, ver, FORM)
+        kr0, kq0, kn0 = infer_key([n.midi for n in _lnotes])
+        lock_key = (kr0, kq0, kn0)
+        print(f"局部重生成　锁定现有调性 {kn0}")
+
     pool = []
     for si, sp in enumerate(expand_many("晓风残月", a.specs)):
         sp.bpm = a.bpm
         apply_register_shift(sp, shift)
+        if lock_key:
+            sp.key_root, sp.mode, sp.key_name = lock_key
         for sd in range(a.seeds):
             rng = random.Random(si * 1000 + sd)
             rate = 0.0 if sd == 0 else (0.25 if sd == 1 else 0.45)
@@ -425,13 +527,38 @@ def main() -> int:
                                           for r in refs))
             if refs else usable[0])
 
-    ps = [n.midi for n in best.notes]
-    mx = max(n.duration_beats for n in best.notes)
+    lead_notes, lead_sections = best.notes, best.SECTIONS
+    lead_name = f"主旋律_{best.spec.key_name}"
+    key_root, quality = best.spec.key_root, best.spec.mode
+
+    if a.sections:
+        # 局部重生成：整首生成一版，然后**只把点名的段落拼进现有旋律**。
+        # 这样不必改 melodize，而「没点名的段落逐字段不变」是可断言的。
+        from svagent.agent import segments as SG
+        old_name, old_notes, _old_secs = read_lead(PROJECT, ver, FORM)
+        scope = [x.strip() for x in a.sections.split(",") if x.strip()]
+        lead_notes, srep = SG.splice(old_notes, best.notes, scope, ver, FORM)
+        lead_sections = sections_from(lead_notes, ver, FORM)
+        lead_name = old_name          # 大部分还是原来那条旋律，名字不改
+        kr2, kq2, _kn = infer_key([n.midi for n in lead_notes])
+        key_root, quality = kr2, kq2
+        print()
+        print("=" * 72)
+        print("局部重生成")
+        print("=" * 72)
+        for line in srep.describe().splitlines():
+            print("  " + line)
+        if not SG.unchanged_outside(old_notes, lead_notes, scope, ver):
+            print("  ✗ 点名之外的段落被改动了 —— 这是 bug，不要写盘")
+            return 5
+
+    ps = [n.midi for n in lead_notes]
+    mx = max(n.duration_beats for n in lead_notes)
     print()
     print("=" * 72)
     print("主旋律")
     print("=" * 72)
-    print(f"  {a.bpm:.0f}BPM {best.spec.key_name}　{len(best.notes)} 音符"
+    print(f"  {a.bpm:.0f}BPM {best.spec.key_name}　{len(lead_notes)} 音符"
           f"　{note_name(min(ps))}-{note_name(max(ps))}")
     print(f"  和声进行 {best.prog}")
     print(f"  节奏细胞 {'/'.join(best.spec.rhythm_cells)}"
@@ -444,8 +571,8 @@ def main() -> int:
         print("  与既有作品的相似度：")
         print(report(best.notes, best.phrases, refs))
 
-    return write_project(a, f"主旋律_{best.spec.key_name}", best.notes,
-                         best.SECTIONS, best.spec.key_root, best.spec.mode,
+    return write_project(a, lead_name, lead_notes,
+                         lead_sections, key_root, quality,
                          cfg, phrases=best.phrases)
 
 

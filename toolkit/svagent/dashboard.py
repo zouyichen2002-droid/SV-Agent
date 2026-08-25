@@ -289,6 +289,26 @@ def _safety_panel(sf: SF.SafetyState) -> str:
     return (f'<h2>安全　第 1 项</h2><div class="card">{"".join(rows)}</div>')
 
 
+def _highlight(nd, depth: int) -> str:
+    """改动高亮（第 6 项）：哪些小节被改了，改了几个音符。
+
+    只有做过局部修改的节点才有这一行 —— 整首重生成没有「哪几小节」可言。
+    """
+    m = nd.metrics_after or {}
+    if not m.get("sections"):
+        return ""
+    bars = m.get("bars") or {}
+    bits = []
+    for name in m["sections"]:
+        b = bars.get(name)
+        bits.append(f"{name} 小节 {b[0]}–{b[1]}" if b else name)
+    src = f"取自 {m['from_node']}　" if m.get("from_node") else ""
+    return (f'<span class="lhint" style="padding-left:{depth * 22 + 93}px">'
+            f'✎ {src}{_e("　".join(bits))}　'
+            f'改了 {m.get("n_replaced", "?")} 个音符，'
+            f'其余 {m.get("n_kept", "?")} 个逐字段不变</span>')
+
+
 def _tree_panel(t: TR.Tree) -> str:
     """会话树（第 3 项）—— 架构文档说这是创作者最常看的一屏。
 
@@ -322,7 +342,9 @@ def _tree_panel(t: TR.Tree) -> str:
             f'<span class="ldt">{_e(nd.label)}　{_e(nd.when)}'
             + (f'　「{_e(nd.verdict_note)}」' if nd.verdict_note else "")
             + ('<b class="here">← 你在这</b>' if nd.id == head else "")
-            + "</span></div>")
+            + "</span>"
+            + _highlight(nd, d)
+            + "</div>")
         for k in t.children(nd.id):
             walk(k, d + 1)
 
