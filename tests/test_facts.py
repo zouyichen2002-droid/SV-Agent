@@ -81,12 +81,18 @@ def test_复验函数自己炸了要报失败而不是崩掉整个体检(monkeyp
     """一条复验出错不该让另外十四条都看不到。"""
     def boom():
         raise RuntimeError("模拟环境坏了")
+
+    # 先量一遍没有坏事实时的基准。**不许写死「6 条通过」** ——
+    # 那个数取决于当前是哪首歌（新歌没有人声轨时 F02 报「无从复验」），
+    # 第二首歌一建出来这条断言就挂了。断言规则，不断言具体数字。
+    base = sum(1 for r in F.verify() if r.ok is True)
+
     bad = F.Fact("FXX", "测试", "假的", "无", "无", boom, F.FAST)
     monkeypatch.setattr(F, "FACTS", F.FACTS + [bad])
     rs = F.verify()
     hit = [r for r in rs if r.fact.id == "FXX"][0]
     assert hit.ok is False and "复验出错" in hit.detail
-    assert sum(1 for r in rs if r.ok is True) >= 6, "别的事实被带崩了"
+    assert sum(1 for r in rs if r.ok is True) == base, "别的事实被带崩了"
 
 
 def test_给模型看的版本要含每条的编号和断言():

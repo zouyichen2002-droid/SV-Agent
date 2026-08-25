@@ -108,15 +108,26 @@ def sine_render(parts, bpm: float, n_bars: int) -> np.ndarray:
     return y
 
 
-def align_report(bpm: float) -> dict:
+def align_report(bpm: float, proj=None) -> dict:
     """对齐的全部数字，一次算完。→ dict。
+
+    `proj` 给了就临时切到那首歌 —— 见 `step3_melody.using()` 的说明：
+    模块级全局是 import 时绑定的，而 in-process 调用（写后钩子、
+    `verify_alignment` 动作）会一直用第一次 import 时的那首歌。
 
     **这是唯一的实现。** `main()` 用它打印，agent 的 `verify_alignment`
     动作也用它 —— 两个入口各自组装同一条管线，必然产出两个不同的数字
     而且两边都不报错（`eval/line_offset.py` 与 `make_listening_checks.py`
     那次就是 0.340 vs 0.360）。
     """
-    y, sr = sf.read(str(AUDIO), always_2d=True)
+    if proj is not None:
+        with S3.using(proj):
+            return _align_report_here(bpm, proj.wav)
+    return _align_report_here(bpm, AUDIO)
+
+
+def _align_report_here(bpm: float, audio: Path) -> dict:
+    y, sr = sf.read(str(audio), always_2d=True)
     mono = y.mean(axis=1).astype(np.float32)
     _lead, _notes, _k, parts = parts_of_project(bpm)
 
@@ -140,12 +151,15 @@ def align_report(bpm: float) -> dict:
     spread = max(s[0] for s in seg) - min(s[0] for s in seg)
 
     return {
-        "offset_ms": round(lag, 2), "raw_ms": round(raw, 2),
-        "bias_ms": round(bias, 2), "corr": round(cor, 3),
-        "bias_corr": round(bcor, 3),
-        "segments_ms": [round(s[0], 2) for s in seg],
-        "spread_ms": round(spread, 2),
-        "duration_s": round(len(mono) / sr, 2),
+        "offset_ms": float(round(lag, 2)), "raw_ms": float(round(raw, 2)),
+        "bias_ms": float(round(bias, 2)), "corr": float(round(cor, 3)),
+        "bias_corr": float(round(bcor, 3)),
+        # **强制转成 Python float。** numpy 的 float64 会原样漏进 JSON，
+        # 打印出来是 `np.float64(0.44)`，而 `json.dumps` 得靠 default=str
+        # 才不炸 —— 那等于把一个类型错误藏进序列化层。
+        "segments_ms": [float(round(s[0], 2)) for s in seg],
+        "spread_ms": float(round(spread, 2)),
+        "duration_s": float(round(len(mono) / sr, 2)),
         "n_events": sum(len(v) for v in parts.values()),
         "ok": abs(lag) <= WARN_MS and spread <= DRIFT_OK_MS and cor >= 0.15,
     }

@@ -193,6 +193,15 @@ def expressiveness(proj: PJ.SongProject) -> list[Metric]:
     if not n_notes:
         return [Metric("pitch_delta_density", "音高微调密度", None, 1.0, " 点/音符"),
                 Metric("tuning_density", "调教点密度", None, 4.0, " 点/音符")]
+    if n_all == 0:
+        # **还没走到调教那一步 ≠ 调教得不好。** 三色纪律：
+        # 0 点是「不知道」，不是「很机械」。端到端跑新歌时暴露的 ——
+        # 第 3 步刚做完就看见两个红叉，看着像出了问题，其实只是还没到。
+        d = "还没调教过（步骤 5）—— **不知道**，不是「很机械」"
+        return [Metric("pitch_delta_density", "音高微调密度", None, 0.5,
+                       " 点/音符", MIN, "", d),
+                Metric("tuning_density", "调教点密度", None, 2.5,
+                       " 点/音符", MIN, "", d)]
     return [
         Metric("pitch_delta_density", "音高微调密度", n_pd / n_notes, 0.5,
                " 点/音符", MIN,

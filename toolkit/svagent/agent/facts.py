@@ -83,16 +83,23 @@ def _v_svp_version() -> tuple[bool, str]:
 def _v_database_two_places() -> tuple[bool, str]:
     from .. import project as PJ
     d = json.loads(PJ.current().svp.read_text(encoding="utf-8-sig"))
-    bad = []
+    bad, n_vocal = [], 0
     for t in d.get("tracks", []):
         main = t.get("mainRef") or {}
         if main.get("isInstrumental"):
             continue
+        if not (t.get("groups") or []):
+            continue          # 还没放音符的空轨，这条断言不适用于它
+        n_vocal += 1
         a = (main.get("database") or {}).get("name") or ""
         gs = [(g.get("database") or {}).get("name") or ""
               for g in (t.get("groups") or [])]
         if not a or not all(gs) or not gs:
             bad.append(t.get("name"))
+    if not n_vocal:
+        # **不适用 ≠ 通过，也 ≠ 失败。** 新歌还没有人声轨时，
+        # 这条断言无从复验 —— 三色纪律，不许拿一个状态冒充另一个。
+        return None, "当前项目还没有人声轨，这条无从复验"
     return not bad, ("人声轨两处都设了声库" if not bad
                      else f"这些轨缺声库：{bad}")
 

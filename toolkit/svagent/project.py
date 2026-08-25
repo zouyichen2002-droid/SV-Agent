@@ -133,14 +133,22 @@ def load(slug: str) -> SongProject:
 
 
 def current() -> SongProject:
-    """当前项目。由环境变量 `SVAGENT_SONG` 决定，默认最后一首。"""
+    """当前项目。由环境变量 `SVAGENT_SONG` 决定，否则取**最近改动的那一首**。
+
+    原来是「按字母序取最后一个」。第二首歌一建出来，
+    默认项目就从 `xiaofeng` 静默变成了 `zhuimeng` —— 四个测试当场挂掉，
+    而如果没有测试，表现会是「创作者跑 `sv state` 看到的是另一首歌」。
+
+    **按字母序排是个任意规则，按最近改动排才对应「我正在做哪一首」。**
+    这个洞只有第二首歌出现时才会露头。
+    """
     slug = os.environ.get("SVAGENT_SONG")
     if not slug:
-        cands = sorted((d.name for d in SONGS.iterdir()
-                        if d.is_dir() and (d / "project.json").exists()))
+        cands = [(d / "project.json") for d in SONGS.iterdir()
+                 if d.is_dir() and (d / "project.json").exists()]
         if not cands:
             raise SystemExit("songs/ 下没有任何 project.json")
-        slug = cands[-1]
+        slug = max(cands, key=lambda p: p.stat().st_mtime).parent.name
     return load(slug)
 
 

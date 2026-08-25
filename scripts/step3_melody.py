@@ -142,6 +142,36 @@ def infer_key(midis: list[int]) -> tuple[int, str, str]:
     return root, quality, name
 
 
+def using(proj):
+    """临时把模块级全局切到某首歌。用 `with`。
+
+    ## 为什么需要它
+
+    这个模块在 **import 时**绑定 `P = PJ.current()`，而 import 只发生一次。
+    作为子进程跑时没问题（每次都是新进程，`SVAGENT_SONG` 说了算），
+    但**被 in-process import 之后**（写后钩子、`verify_alignment` 动作
+    都这么用），globals 就固定在了第一次 import 时的那首歌上。
+
+    第二首歌一出现，`align_report` 就会去读第一首歌的 wav —— 而且
+    不报错，只是数字算错。这个洞只有多首歌并存时才会露头。
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def _cm():
+        global P, LYRICS, PROJECT, BACKUP_DIR, FORM, N_BARS, SONG_BPM
+        old = (P, LYRICS, PROJECT, BACKUP_DIR, FORM, N_BARS, SONG_BPM)
+        P, LYRICS, PROJECT = proj, proj.lyrics, proj.svp
+        BACKUP_DIR, FORM = proj.backup_dir, proj.form
+        N_BARS, SONG_BPM = proj.n_bars, proj.bpm
+        try:
+            yield proj
+        finally:
+            (P, LYRICS, PROJECT, BACKUP_DIR, FORM,
+             N_BARS, SONG_BPM) = old
+    return _cm()
+
+
 def read_lead(project: Path, ver, form):
     """从工程里读回主旋律，并重建 melodize 那种 SECTIONS 形状。
 

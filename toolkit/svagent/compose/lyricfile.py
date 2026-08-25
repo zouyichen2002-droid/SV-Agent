@@ -191,3 +191,60 @@ if __name__ == "__main__":
             print("  ", x)
     if not probs and not warn:
         print("\n✓ 格式与字数全部通过")
+
+
+# =========================================================================
+# 新歌的默认骨架
+# =========================================================================
+
+# 无词段落。它们占小节但不占句。
+WORDLESS = ("前奏", "间奏", "尾奏")
+
+# 默认进行。四句段落走 Am-F-C-G，两句段落走 F-G。
+# **最后一句强制落 Am**（主和弦）—— 这与 `vary_progression`
+# 「最后一段的最后一句永不换」是同一条规矩。
+_PROG4 = ("Am", "F", "C", "G")
+_PROG2 = ("F", "G")
+
+DEFAULT_BARS_PER_LINE = 2
+DEFAULT_CHARS = 9
+
+
+def default_skeleton(form, *, bars_per_line: int = DEFAULT_BARS_PER_LINE,
+                     chars: int = DEFAULT_CHARS):
+    """曲式 → 一份可写的空骨架。→ [(段名, [(和弦, 字数), …]), …]
+
+    ## 为什么需要它
+
+    `gen_lyrics` 原来从**已有版本**读骨架 —— 那对改词是对的，
+    对一首新歌却是死路：新歌没有已有版本。这个洞只有在
+    「从一句主题开始」时才会撞到，而第一版的十项建造全是在一首
+    **已完成**的歌上验的，所以一直没露头。
+
+    ## 句长必须从曲式推导，不能是独立参数
+
+    这条是踩出来的：句长曾经是规格里的一个独立随机参数，而曲式
+    按「每句 2 小节」分配小节数 —— 两者不一致，结果是同轨重叠 57 处
+    加一个 11.5 秒的断气音。所以这里 **句数 = 小节数 ÷ 每句小节数**，
+    没有第二个来源。
+    """
+    out = []
+    secs = [(n, b) for n, b in form if n not in WORDLESS]
+    for si, (name, bars) in enumerate(secs):
+        n_lines = max(1, bars // bars_per_line)
+        prog = _PROG4 if n_lines >= 4 else _PROG2
+        lines = [(prog[i % len(prog)], chars) for i in range(n_lines)]
+        if si == len(secs) - 1:
+            lines[-1] = ("Am", chars)          # 最后一句落主和弦
+        out.append((name, lines))
+    return out
+
+
+def skeleton_text(form, **kw) -> str:
+    """骨架的可读形态，直接喂给模型。"""
+    lines = []
+    for name, ls in default_skeleton(form, **kw):
+        lines.append(name)
+        for chord, n in ls:
+            lines.append(f"  {chord}  （{n} 字）")
+    return "\n".join(lines)

@@ -140,7 +140,7 @@ def _h_alignment(proj) -> HookResult:
     sys.path.insert(0, str(ROOT / "scripts"))
     try:
         import step5_assemble as S5
-        rep = S5.align_report(proj.bpm)      # **与脚本同一个实现**
+        rep = S5.align_report(proj.bpm, proj)   # **与脚本同一个实现**
     except Exception as e:
         return HookResult("alignment", False, f"跑不起来：{type(e).__name__}: {e}")
     return HookResult("alignment", rep["ok"],
@@ -265,7 +265,7 @@ def _a_mix(proj, p) -> dict:
 def _a_verify_alignment(proj, p) -> dict:
     sys.path.insert(0, str(ROOT / "scripts"))
     import step5_assemble as S5
-    return {"alignment": S5.align_report(p.get("bpm") or proj.bpm)}
+    return {"alignment": S5.align_report(p.get("bpm") or proj.bpm, proj)}
 
 
 def _a_revert(proj, p) -> dict:
@@ -390,17 +390,23 @@ def _a_gen_lyrics(proj, p) -> dict:
     from .. import llm as LM
     from ..compose.lyricfile import parse
 
+    from ..compose.lyricfile import skeleton_text
+
     vs, _probs = parse(proj.lyrics)
     ver = vs[next(iter(vs))] if vs else None
     if ver is None:
-        raise ToolError(f"{proj.lyrics.name} 里没有可参照的版本，"
-                        "无法推断曲式与和声进行")
-
-    skeleton = []
-    for sec, lines in ver.sections:
-        skeleton.append(sec)
-        for text, chord in lines:
-            skeleton.append(f"  {chord}  （{len(text)} 字）")
+        # **新歌没有已有版本。** 从曲式推导一份默认骨架 ——
+        # 这个洞只有「从一句主题开始」时才会撞到，而十项建造全是在
+        # 一首已完成的歌上验的，所以一直没露头。
+        skeleton = skeleton_text(proj.form).splitlines()
+        source = "曲式推导的默认骨架"
+    else:
+        skeleton = []
+        for sec, lines in ver.sections:
+            skeleton.append(sec)
+            for text, chord in lines:
+                skeleton.append(f"  {chord}  （{len(text)} 字）")
+        source = f"现有版本 {ver.key}"
     n = int(p.get("n") or 2)
 
     nl = chr(10)
@@ -412,9 +418,16 @@ def _a_gen_lyrics(proj, p) -> dict:
         "",
         *skeleton,
         "",
-        "硬要求：一首歌只讲一件事；少生僻字；两段副歌要递进，"
-        "靠措辞升级不换意象；句尾押韵，一段之内韵尾统一；"
-        "多写动作少写感受。",
+        "硬要求：",
+        "1. 一首歌只讲一件事。**抽象概念最多留一个**，其余全部落到"
+        "可触的物件与动作上 —— 写「鞋带磨断了第三根」，"
+        "不写「我很坚持」。",
+        "2. **禁用这类词**：坚持、相信、勇敢、梦想（标题除外）、"
+        "闪耀、绽放、翅膀、远方、光芒。它们是口号，不是画面。",
+        "3. 两段副歌要递进，靠措辞升级不换意象。",
+        "4. 句尾押韵，一段之内韵尾统一；四句里第一句必须押上。",
+        "5. 多写动作少写感受；少生僻字。",
+        "6. 每 3–4 句虚写要垫一句实写，否则情绪落不了地。",
         f"输出 {n} 个版本，每版以「## <字母> ｜<标题>」开头，"
         "然后是段名与带和弦的歌词行，格式与骨架完全一致。"
         "不要解释，不要写别的。",
@@ -433,7 +446,7 @@ def _a_gen_lyrics(proj, p) -> dict:
     text = (out["message"].get("content") or "").strip()
     text = _re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     blocks = [b.strip() for b in text.split("## ") if b.strip()]
-    return {"n_versions": len(blocks),
+    return {"n_versions": len(blocks), "skeleton_source": source,
             "candidates": ["## " + b for b in blocks],
             "usage": cli.usage.to_json(),
             "note": "**没有写文件。** 选中哪一版告诉我，我再写进 "
