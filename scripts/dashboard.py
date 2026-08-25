@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svagent import dashboard as D
+from svagent import session as S
 
 
 def main() -> int:
@@ -32,7 +32,8 @@ def main() -> int:
                     help="监视多久后自动收工（默认 20 分钟）")
     a = ap.parse_args()
 
-    p = D.write(refresh_s=a.refresh, live=a.watch)
+    sess = S.Session()
+    p = sess.dashboard(live=a.watch)
     print(f"仪表盘　{p}　{p.stat().st_size} B")
     if a.open:
         import os
@@ -43,11 +44,12 @@ def main() -> int:
 
     if a.watch:
         try:
+            from svagent import dashboard as D
             D.watch(refresh_s=a.refresh, minutes=a.minutes)
         except KeyboardInterrupt:
             print()
             print("停止监视。页面变回静态快照 —— 下次打开记得重新生成。")
-            D.write(refresh_s=a.refresh, live=False)
+            sess.dashboard(live=False)
     return 0
 
 

@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svagent import project as PJ                 # noqa: E402
+from svagent import session as S                  # noqa: E402
 from svagent.agent import safety as SF            # noqa: E402
 from svagent.agent import safewrite as SW         # noqa: E402
 
@@ -41,7 +41,8 @@ def main() -> int:
     ap.add_argument("--sweep", action="store_true", help="清掉崩溃残留")
     a = ap.parse_args()
 
-    proj = PJ.current()
+    sess = S.Session()
+    proj = sess.proj
     proj.agent_dir.mkdir(parents=True, exist_ok=True)
 
     if a.sweep:
@@ -87,7 +88,7 @@ def main() -> int:
         proj.stop_file.unlink(missing_ok=True)
         print("已取消停止。")
 
-    st = SF.inspect(proj)
+    st = sess.safety()
     print(f"\n{proj.slug}｜{proj.title}　安全状态")
     print(st.report())
     return 0 if st.worst != "off" else 2

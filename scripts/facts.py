@@ -35,7 +35,8 @@ def main() -> int:
         return 0
 
     costs = (F.FAST, F.SLOW, F.NETWORK) if a.all else (F.FAST,)
-    rs = F.verify(costs=costs)
+    from svagent import session as S
+    rs = S.Session().verify_facts(costs=costs)
     for r in rs:
         print(f"  {MARK[r.ok]} {r.fact.id} {r.fact.domain:<6}{r.detail}")
     s = F.summary(rs)
@@ -45,7 +46,6 @@ def main() -> int:
     if not a.all:
         print("  （加 --all 连 slow 与 network 一起跑）")
 
-    F.save_report(rs)          # 仪表盘读这份报告，它自己不跑复验
     if a.write:
         p = F.write_markdown(results=rs)
         print(f"\n已重新生成 {p}")

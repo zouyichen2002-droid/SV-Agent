@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svagent import project as PJ                # noqa: E402
+from svagent import session as S                 # noqa: E402
 from svagent.agent import diagnose as DG         # noqa: E402
 from svagent.agent import tools as TL            # noqa: E402
 
@@ -35,12 +35,13 @@ def main() -> int:
     ap.add_argument("--min-improvement", type=float, default=0.15)
     a = ap.parse_args()
 
-    proj = PJ.current()
-    d = DG.diagnose(proj, a.complaint, floor=a.floor)
+    sess = S.Session()
+    proj = sess.proj
+    d = sess.diagnose(a.complaint, floor=a.floor)
     print(d.report())
     print()
     print("=" * 68)
-    print(DG.plan(d))
+    print(sess.plan(d))
 
     if d.should_ask or not a.trial:
         DG.save_report(d)
@@ -50,7 +51,7 @@ def main() -> int:
 
     print()
     print("=" * 68)
-    trials = DG.trial(proj, d.hypotheses)
+    trials = sess.trial(d.hypotheses)
     print(DG.report_trials(trials))
 
     best = DG.pick(trials, min_improvement=a.min_improvement)
@@ -70,7 +71,7 @@ def main() -> int:
         DG.save_report(d, trials, best)
         return 0
 
-    r = TL.Runner(proj).run(h.action, h.params)
+    r = sess.act(h.action, h.params)
     print()
     print(r.report())
     DG.save_report(d, trials, best)

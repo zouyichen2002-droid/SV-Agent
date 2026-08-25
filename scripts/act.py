@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svagent import project as PJ              # noqa: E402
+from svagent import session as S                # noqa: E402
 from svagent.agent import budget as BD         # noqa: E402
 from svagent.agent import tools as T           # noqa: E402
 
@@ -53,7 +53,8 @@ def main() -> int:
         print(json.dumps(act.schema, ensure_ascii=False, indent=2))
         return 0
 
-    proj = PJ.current()
+    sess = S.Session()
+    proj = sess.proj
     if not a.action:
         print(f"{proj.slug}｜{proj.title}　动作池 {len(T.ACTIONS)} 个"
               f"（导给模型 {len(T.to_mistral_tools())} 个）\n")
@@ -73,7 +74,8 @@ def main() -> int:
     bud = BD.Budget(seconds=a.budget, max_actions=a.max_actions,
                     stop_file=proj.stop_file)
     try:
-        r = T.Runner(proj, budget=bud).run(a.action, params)
+        sess.budget = bud
+        r = sess.act(a.action, params)
     except T.ToolError as e:
         print(f"✗ {e}")
         return 2

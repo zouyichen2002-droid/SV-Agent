@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit"))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from svagent import project as PJ            # noqa: E402
+from svagent import session as S              # noqa: E402
 from svagent.agent import tree as TR         # noqa: E402
 
 
@@ -33,8 +33,9 @@ def main() -> int:
     ap.add_argument("--rejected", action="store_true", help="列出被否决的分支")
     a = ap.parse_args()
 
-    proj = PJ.current()
-    t = TR.Tree(proj)
+    sess = S.Session()
+    proj = sess.proj
+    t = sess.tree
 
     try:
         if a.commit:
