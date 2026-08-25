@@ -1,125 +1,195 @@
 # SV-Agent
 
-**An agent orchestration layer over the Synthesizer V MCP runtime** — memory, retrieval, tool design, and staged evaluation gates for vocal covers and original composition.
+**一句话 → 一首歌。** 虚拟歌手（Synthesizer V + FL Studio）创作的全流程 agent。
 
-> ### Relationship to upstream — please read first
->
-> This is **not** a fork of, nor a replacement for, [`SynthVCopilot/synthv-agent-bridge`](https://github.com/SynthVCopilot/synthv-agent-bridge).
->
-> That project (Apache-2.0) provides the **MCP runtime**: the six-tool surface, fingerprint-guarded writes, undo boundaries, and file-IPC transport into Synthesizer V Studio 2 Pro. It is consumed here as an unmodified dependency.
->
-> **This repository is the layer above it**: orchestration, memory, retrieval, evaluation, and the domain workflows for cover reproduction and original songwriting. All credit for the runtime belongs upstream.
->
-> *(Naming note: the similar name is coincidental. See the table below for who does what.)*
+> **An agent for virtual-singer songwriting.** One sentence in, a finished song out.
+> The contribution here is **not the model and not the code — it is a verifiable
+> workflow**: every step produces a number, every number has a threshold calibrated
+> against work a human already accepted, and every threshold has a test that proves
+> it fires. 212 tests, 18 machine-checked environment constraints, 13 ADRs,
+> two songs taken end-to-end.
 
-| Concern | Owner |
+---
+
+## 这个项目最大的贡献不是代码，是**一套可验证的工作流**
+
+绝大部分精力花在两件事上：**把创作流程拆到可执行**，以及**让每一步都能被证伪**。
+
+生成旋律的代码不难写。难的是回答这些问题：
+
+- 这段旋律**能不能用**？（不是「听起来还行」，是可判定的）
+- 伴奏和人声**对上了没有**？差多少毫秒？
+- 改了副歌之后，主歌**动没动**？
+- 上一次的调教**还在吗**，还是被谁悄悄冲掉了？
+- 这个数字**是量出来的，还是我记错了**？
+
+这套工作流的价值在于：**上面每一个问题都有一条命令能回答，而且答案是数字。**
+
+---
+
+## 为什么验证是重点：这条链上的错误几乎都是「安静」的
+
+这是整个项目最核心的观察。列几个真实抓到的：
+
+| 出了什么事 | 表面看起来 |
 |---|---|
-| MCP tool surface, guarded writes, undo boundaries, file IPC | upstream `synthv-agent-bridge` |
-| Pipeline orchestration & staged quality gates | **this repo** |
-| Memory (per-song state, tuning conventions, style preferences) | **this repo** |
-| Retrieval over domain knowledge & prior work | **this repo** |
-| Evaluation harness, benchmark cases, regression metrics | **this repo** |
-| Musical/aesthetic judgment | the human |
+| 同一段分析在两个入口各写一遍 | 一个报 0.340、一个报 0.360，**两边都不报错** |
+| 起音检测器有 +11 ms 系统性偏置 | 报「伴奏晚了 11 ms」，**让创作者去修我的测量误差** |
+| 「出界就移八度」把低八度变成同音 | 生成了「和声」，**其实是齐唱** |
+| 句长参数与曲式各算各的 | 同轨重叠 57 处 + 一个 11.5 秒的断气音，**文件照样能打开** |
+| 局部重生成从空模板重建工程 | 音频轨、混音、调教**全丢**，工程照样能唱 |
+| 仪表盘是快照不是视图 | 改了歌词，页面**理直气壮地显示两小时前的数字** |
+| `PJ.current()` 按字母序取最后一个 | 新建一首歌，**默认项目静默变成了另一首** |
+| 检查器自己崩了 | 一个 finding 都不报 —— **看起来像「全过」** |
+
+**没有一个能被「跑一遍看输出」抓到。** 输出全是正常的。
+
+所以这个项目的判据不是「跑通了」，是：
+
+> **每个检查都要有配套的「注入这个缺陷 → 必须报出来」的反向测试。**
+> 只报 0 的检查不算检查。
+
+建造过程中这样抓到 **20 处**，端到端跑第一首新歌时又抓到 **5 处** ——
+后 5 处全都只有「第二首歌 / 从零开始」时才会露头。
+完整清单见 [`specs/v1-acceptance-report.md`](specs/v1-acceptance-report.md) 第 3 节。
 
 ---
 
-## Status
+## 验证做到了什么程度
 
-**Stage 1 of 6 complete and passing its gate.** The cross-estimator pitch evidence
-layer is implemented and measured; note construction and bridge write-back are not.
+| 层 | 内容 |
+|---|---|
+| **八项检查** | 字数 · 音域 · 跳进 · 调内音 · 落音 · 乐句缺口 · 倒字 · **整句与和弦贴合度** |
+| **对齐验证** | 互相关 + **正弦渲染自校准**（检测器有 +11 ms 偏置，不校准就会让人去修测量误差）。偏移与漂移分开报 —— 前者能修，后者必须回 DAW 重渲 |
+| **七个指标** | 音高起伏三个子指标 · 响度跨度 · 表现力两个 · 和弦贴合度。**阈值全部按已验收的作品实测校准** |
+| **属性测试** | 幂等 · 原子 · 可复现 · 不重叠 · 不越界 · 和声非同音 · 检查会响 · 显示不过期 |
+| **环境事实** | 18 条硬约束，**8 条每次跑测试都自动复验** —— 一份没人复查的约束清单，和只报 0 的检查是同一类东西 |
+| **写入安全** | 原子写 · 内容哈希校验 · 全套快照（去重 86%）· 可中断 · 预算超时 |
 
-| Stage | What | Gate | State |
-|---|---|---|---|
-| 0 | Isolate the lead vocal from backing vocals | listening check | **deferred** — measurement showed it is not the bottleneck ([ADR-0002](specs/adr/0002-stage1-before-stage0.md)) |
-| 1 | Cross-estimator pitch evidence | ≥85% pair agreement **and** ≥65% median per-line coverage | **passing** — 87.4% / 70.3% |
-| 2 | Per-line lyric offset | residual < 150 ms per line | not started |
-| 3 | Per-syllable forced alignment | ≥98% aligned without interpolation | prototype validated (95.2%) |
-| 4 | Note construction | 0 overlaps, ≥85 ms, **0 notes without direct acoustic evidence** | not started |
-| 5 | Write back through the MCP runtime | human listening check | not started |
+**三色纪律贯穿全部**：绿 = 有依据说它好，红 = 有依据说它坏，
+**灰 = 还没有可判断的依据**。不许拿绿灯冒充「我不知道」。
 
-Stage 1 raised usable pitch evidence from 43% to 70.3% of sung frames, and defeated
-the worst documented failure of the previous attempt (a pitch estimator locking onto
-the third sub-harmonic: MIDI 68.90 read as 50.00 — now 69.00, +0.10 semitone).
+### 阈值校准的原则
 
-See `HANDOFF.md` for background and `specs/adr/` for the decision log.
+> 任何把**已经通过验收的作品**判为不合格的阈值都是错的 —— 那不是严格，是假阳性。
+
+实例：第九项检查一开始按「和弦音个数」加权，会把一首已验收的歌判出 4 处问题；
+改成按**时长**加权后是 0 处。短的经过音是装饰，长音才真的糊掉和声。
 
 ---
 
-## Why this exists
+## 工作流本身
 
-Two goals, in order:
-
-1. **Solve a real creative problem.** Producing vocal covers and original songs with Synthesizer V involves a long chain of mechanical work — transcription, lyric alignment, phoneme timing, pitch curves, expression parameters — that is tedious but highly structured. Good targets for an agent.
-2. **Serve as a full-stack agent architecture exercise**, exercising MCP, tool design, memory, retrieval, orchestration, and evaluation against a domain where correctness is *measurable* rather than a matter of taste.
-
-## Design principles
-
-These came out of a failed first attempt (documented, see below). They are the point of the project, not decoration.
-
-1. **Every stage has a numeric gate.** No stage advances until its criterion is met. The first attempt chained six inference steps with no verification and produced a regression dressed up as a 93% improvement.
-2. **Never validate with the estimator you built with.** Notes derived from an f0 estimator cannot be scored by that same estimator. Cross-estimator agreement, or nothing.
-3. **Refuse to guess.** Output only what has direct acoustic evidence. Report gaps explicitly instead of interpolating. In the first attempt, 21% of emitted notes were interpolated from neighbours — that fabrication *was* the audible defect.
-4. **The human owns the last mile.** The system's job is to make the mechanical part trustworthy and to say clearly where it is uncertain.
-
-## Benchmark & acceptance criteria
-
-One Mandarin cover is used as the regression case. A passing cover pipeline must satisfy **all** of:
-
-| Metric | Target | First attempt |
-|---|---|---|
-| Syllable alignment rate (direct, no interpolation) | ≥ 98% | 95.2% |
-| Pitch accuracy, measured by an **independent** estimator | ≥ 85% within 0.5 semitone | 64.3% (grounded subset only) |
-| Fabricated notes | **0** | 63 of 300 (21%) |
-| Note geometry | 0 overlaps, all durations ≥ 85 ms | met |
-| Human listening check | no audible lyric misalignment | **failed** |
-
-The reference audio, stems, lyric files and project files for the benchmark are **not** in this repository (third-party copyright). Paths are supplied via local config.
-
-## Architecture
+六步，**边界是硬的**：
 
 ```
-        human  ──  direction, aesthetic judgment, final acceptance
-          │
-   ┌──────▼───────────────────────────────────────────┐
-   │  SV-Agent    (this repo)                         │
-   │    orchestration + staged gates                  │
-   │    memory  ·  retrieval  ·  evaluation harness    │
-   └──────┬───────────────────────────────────────────┘
-          │ MCP over stdio
-   ┌──────▼───────────────────────────────────────────┐
-   │  synthv-agent-bridge   (upstream, Apache-2.0)     │
-   │    six-tool surface, guarded writes, undo         │
-   └──────┬───────────────────────────────────────────┘
-          │ file IPC → resident Lua script
-   ┌──────▼───────────────────────────────────────────┐
-   │  Synthesizer V Studio 2 Pro                       │
-   └───────────────────────────────────────────────────┘
+① 定题目      创作者给一句主题
+② 定歌词      agent 出候选 → 创作者拍板 → agent 修字数/韵脚
+③ 定旋律和声  agent。八项检查 0 finding 才往下走
+④ 定伴奏      agent 出 MIDI → 创作者在 DAW 里配器导出
+⑤ 装配调教    agent。对齐 ≤10 ms 才往下走
+⑥ 混音        agent
 ```
 
-## Layout
+**第 ④ 步的手工部分不是偷懒，是硬约束。**
+FL Studio 的脚本 API 不能加载插件（原文 *"We cannot load NEW plugins (FL API limit)"*）——
+任何 agent 都替不了「导入 MIDI」和「挂音源」。这条记在环境事实 F04 里，
+连同另外 17 条：为什么必须这样、不知道会怎样、**怎么学到的**。
+
+第 ③⑤ 步的「不往下走」也是硬的：**对不上的话后面全是白做。**
+
+---
+
+## agent 层
+
+工作流之上是十项建造，全部完成：
 
 ```
-toolkit/            implementation
-skills/             agent-facing runbooks
-specs/              specifications
-specs/adr/          decision records — why each choice was made, and what evidence would overturn it
-eval/               benchmark cases and reports
-scripts/            model fetch, environment setup
+1  原子写 · 全套快照 · 哈希校验 · 可中断 · 超时
+2  幂等性测试 + 语义归一化
+3  会话树（journal · HEAD · 隐式分支 · 裁决）
+4  环境事实归集（能自动复验的必须自动复验）
+5  工具层（12 个动作 · JSON Schema · 写后钩子）
+6  按段落取音符（局部重生成 + cherry-pick）
+7  两个新指标 + 第九项检查
+8  诊断层 · 并行假设 · Plan mode
+9  库边界 · 统一 CLI · 斜杠命令
+10 接 Mistral（tool-calling 循环）
 ```
 
-## Requirements
+两处设计取向值得单独说：
 
-- Synthesizer V Studio 2 Pro ≥ 2.1.2 (developed against 2.2.1)
-- Node.js ≥ 20.10 (for the upstream MCP runtime)
-- Python 3.13
-- An MCP host that speaks local stdio
+**`tool_result` 带数字，不是「执行成功」。** 所以模型不需要判断正确性 ——
+它看 `findings 前后 / 改了几个音符 / 对齐偏移多少毫秒` 决定下一步。
+**模型负责品味，检查负责正确。**
 
-## Licence
+**诊断层会说「我不确定」。** 第一版只启用三条最有把握的规则，其余一律问。
+指标全过时它拒绝猜测 —— 一个会说「我不确定」的诊断层是可用的，自信瞎猜的不是。
 
-TBD for this repository's own code.
+---
 
-Third-party components retain their own terms:
+## 用它
 
-- `synthv-agent-bridge` — Apache-2.0
-- `SynthVCopilot/SKILLS` — Apache-2.0 + Commons Clause + additional terms. **Source-available, not open source.** Personal and internal commercial use permitted; redistribution as part of a paid product is not. Outputs produced with it are unrestricted.
-- Acoustic models are downloaded at setup time and are not redistributed here.
+```bash
+python scripts/sv.py state          # 这首歌到哪了、下一步谁做
+python scripts/sv.py dash --open    # 八块面板：状态/树/安全/动作/诊断/模型/指标/约束
+python scripts/sv.py why "副歌不够爆" # 说一句人话，它诊断
+```
+
+完整用法见 [`HOWTO.md`](HOWTO.md)。**克隆之后先装提交钩子**：
+
+```bash
+git config core.hooksPath .githooks
+```
+
+---
+
+## 诚实地说，还缺什么
+
+- **诊断层零实测支撑**，只敢答三类。创作者实际说的第一句话它就答不了
+- **记忆层基本是空的** —— 偏好目前是改代码存的，不是数据
+- 「太像上一首」需要参照曲，还没接
+- 仪表盘只读；`adjust_spec` 只暴露了音区偏移
+- 端到端只走过一首新歌。**验证方法本身还需要更多真实使用来检验**
+
+完整清单见 [`specs/v1-acceptance-report.md`](specs/v1-acceptance-report.md) 第 4 节。
+
+---
+
+## 结构
+
+```
+toolkit/svagent/         库。业务逻辑只在这里
+  agent/                 agent 层（十项建造）
+  compose/               作曲能力（检查 · 生成 · 修复 · 调教 · 混音）
+scripts/                 薄入口。逻辑一行都不在这里
+specs/                   规格 · 13 份 ADR · 环境事实 · 验收报告
+tests/                   212 个测试
+.githooks/               提交前凭据扫描
+```
+
+**前端只渲染，不计算。** 需要一个新数字就去库里加 ——
+两个入口各算一遍，迟早算出两个不同的值而且两边都不报错。
+
+---
+
+## 依赖与出处
+
+- 直写 `.svp`（[ADR-0009](specs/adr/0009-write-svp-directly.md)）。
+  上游 [`SynthVCopilot/synthv-agent-bridge`](https://github.com/SynthVCopilot/synthv-agent-bridge)（Apache-2.0）
+  是最初的方案，**现已不在主链路**；`toolkit/svagent/bridge.py` 保留但不被引用
+- FL 桥同样移出主链路（[ADR-0011](specs/adr/0011-drop-fl-bridge-from-v1.md)）——
+  它的混音工具全部要求「插件已加载」，而 FL 的 API 不允许加载插件
+- 声库与声学模型不在此仓库，也不再分发
+- 另一条线（**扒歌翻唱**的音高证据流水线）代码在 `eval/`，
+  ADR-0001～0003 有记录，目前**暂停**
+
+---
+
+## 许可
+
+**目前没有 LICENSE 文件 —— 也就是说仓库虽然公开，法律上仍是「保留所有权利」。**
+要真正开源需要显式加一个许可证。
+
+第三方组件保留各自条款：`synthv-agent-bridge` 是 Apache-2.0；
+`SynthVCopilot/SKILLS` 是 Apache-2.0 + Commons Clause（**source-available，不是开源**）。
