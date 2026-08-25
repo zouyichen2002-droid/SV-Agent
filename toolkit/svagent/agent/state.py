@@ -14,7 +14,7 @@
 所以每一步的完成判定都是**从文件里现算的**：
 
     步骤 2  歌词能解析、有版本、字数过关
-    步骤 3  工程里有主旋律轨且七项检查通过、同轨重叠为 0
+    步骤 3  工程里有主旋律轨且八项检查通过、同轨重叠为 0
     步骤 4  伴奏 MIDI 存在且与工程里的旋律**同源**（每句末音落在标注和弦上）
     步骤 5  工程里有指向 wav 的音频轨；两条人声轨有调教点
     步骤 6  混音 FX 已启用
@@ -290,7 +290,7 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
 
 
 def check_melody(proj: PJ.SongProject | None = None) -> list:
-    """对工程里的主旋律跑七项检查。比 inspect 慢，所以单独一个函数。"""
+    """对工程里的主旋律跑八项检查。比 inspect 慢，所以单独一个函数。"""
     proj = proj or PJ.current()
     import sys
     sys.path.insert(0, str(PJ.ROOT / "scripts"))
@@ -299,15 +299,8 @@ def check_melody(proj: PJ.SongProject | None = None) -> list:
     ver = vs[next(iter(vs))]
     _name, notes, sections = S3.read_lead(proj.svp, ver, proj.form)
     kr, kq, _kn = S3.infer_key([n.midi for n in notes])
-    from ..compose.checks import Phrase
-    phrases, idx, pi = [], 0, 0
-    for _sn, _b, lines in sections:
-        for _t, syls, chord in lines:
-            _pcs, root, q = chord_of(chord, kr)
-            phrases.append(Phrase(pi, idx, idx + len(syls),
-                                  chord_root=root, chord_quality=q))
-            idx += len(syls)
-            pi += 1
+    from ..compose.melodize import phrases_of
+    phrases = phrases_of(sections, kr)          # **一个实现**
     text = "".join(t for _sn, _b, lines in sections for t, _s, _c in lines)
     return run_all(notes, text, kr, kq, phrases, CheckCfg())
 
@@ -319,6 +312,6 @@ if __name__ == "__main__":
     print(st.report())
     if st.steps[2].done:
         fs = check_melody(st.proj)
-        print(f"\n  七项检查：{len(fs)} findings")
+        print(f"\n  八项检查：{len(fs)} findings")
         for f in fs[:6]:
             print(f"    {f}")

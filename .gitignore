@@ -108,3 +108,6 @@ songs/_tools*/
 
 # 段落测试的沙盒
 songs/_seg*/
+
+# 指标测试的沙盒
+songs/_metrics*/

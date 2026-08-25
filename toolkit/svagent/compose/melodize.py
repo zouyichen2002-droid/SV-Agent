@@ -66,6 +66,25 @@ def chord_of(name: str, key_root: int) -> tuple[tuple[int, ...], int, str]:
     triad = (0, 4, 7) if qual == "major" else (0, 3, 7)
     return tuple((root + t) % 12 for t in triad), root, qual
 
+def phrases_of(sections, key_root: int):
+    """SECTIONS + 主音 → `Phrase` 列表（带每句的和弦）。
+
+    **唯一的实现。** 这段构造原来在 `state.check_melody`、`step3` 的候选生成、
+    以及新写的 `metrics.chord_fit` 里各有一份 —— 第四份差点也写出来。
+    乐句边界一旦分叉，八项检查与诊断指标就会对着不同的句子说话。
+    """
+    from .checks import Phrase
+    out, idx, pi = [], 0, 0
+    for _sec, _bar, lines in sections:
+        for _text, syls, chord in lines:
+            _pcs, root, q = chord_of(chord, key_root)
+            out.append(Phrase(pi, idx, idx + len(syls),
+                              chord_root=root, chord_quality=q))
+            idx += len(syls)
+            pi += 1
+    return out
+
+
 # 轮廓形状：给出「归一化位置 → 相对音区高度」的目标曲线
 # 末字长音的上限（拍）。见 _line_rhythm 里的说明
 MAX_TAIL_BEATS = 4.0

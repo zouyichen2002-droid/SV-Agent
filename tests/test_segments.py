@@ -284,7 +284,7 @@ def test_局部重生成必须锁在现有调上(proj):
     assert (kr1, kq1) == (kr0, kq0), f"调性从 {kn0} 变成了 {kn1}"
 
 
-def test_局部重生成后七项检查要过(proj):
+def test_局部重生成后八项检查要过(proj):
     """默认候选池下应当 0 finding。**这是写后钩子的活儿，这里只是钉住它。**"""
     r = T.Runner(proj, deep_metrics=False).run(
         "gen_melody", {"scope": ["副歌"], "specs": 24, "seeds": 3})

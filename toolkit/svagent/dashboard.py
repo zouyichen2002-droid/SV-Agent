@@ -44,6 +44,7 @@ from pathlib import Path
 from . import project as PJ
 from .agent import facts as FA
 from .agent import idem as ID
+from .agent import metrics as MT
 from .agent import safety as SF
 from .agent import safewrite as SW
 from .agent import state as ST
@@ -53,7 +54,6 @@ from .agent import tree as TR
 # 还没建造的面板：名字 · 属于第几项 · 一句话说明。**只列，不画。**
 PENDING_PANELS = [
     ("本轮", 5, "诊断 → 假设 → 动作 → 度量前后对比"),
-    ("指标", 7, "八项检查 + 三个新指标的当前值与阈值"),
 ]
 
 WHO_CLS = {ST.BY_AGENT: "agent", ST.BY_CREATOR: "creator", ST.BY_BOTH: "both"}
@@ -309,6 +309,30 @@ def _highlight(nd, depth: int) -> str:
             f'其余 {m.get("n_kept", "?")} 个逐字段不变</span>')
 
 
+def _metrics_panel(ms) -> str:
+    """指标面板（第 7 项）：每个指标的当前值、阈值、以及不达标该改哪。
+
+    **阈值是实测校准的**：《晓风残月》已通过创作者验收，任何把它判为
+    「太平」的阈值都是错的 —— 那不是严格，是假阳性。
+    """
+    rows = []
+    for m in ms:
+        rows.append(
+            f'<div class="lamp {m.color}"><span class="dot"></span>'
+            f'<span class="lnm">{_e(m.label)}</span>'
+            f'<span class="ldt">{_e(m.show())}　{_e(m.detail)}</span>'
+            + (f'<span class="lhint">→ {_md(m.means)}</span>'
+               if m.ok is False and m.means else "")
+            + "</div>")
+    n_ok = sum(1 for m in ms if m.ok is True)
+    n_bad = sum(1 for m in ms if m.ok is False)
+    n_unk = sum(1 for m in ms if m.ok is None)
+    lead = (f'<div class="fl" style="padding-left:0"><span>{len(ms)} 项　'
+            f'{n_ok} 项达标 · {n_bad} 项不达标 · {n_unk} 项还没有依据'
+            f'　阈值按已验收的《晓风残月》校准</span></div>')
+    return (f'<h2>指标　第 7 项</h2><div class="card">{lead}{"".join(rows)}</div>')
+
+
 def _tree_panel(t: TR.Tree) -> str:
     """会话树（第 3 项）—— 架构文档说这是创作者最常看的一屏。
 
@@ -493,6 +517,7 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5,
     if sf is not None:
         body.append(_safety_panel(sf))
     body.append(_actions_panel())
+    body.append(_metrics_panel(MT.collect(st.proj)))
     body.append(_facts_panel())
 
     body += [

@@ -20,7 +20,7 @@
 
 ## 写入前的守卫
 
-- 音符先过[七项检查](../toolkit/svagent/compose/checks.py)，有 block 就拒绝写
+- 音符先过[八项检查](../toolkit/svagent/compose/checks.py)，有 block 就拒绝写
 - 核对当前工程名，与 `--expect` 不符就中止（防写错工程）
 - 秒→blicks 用桥的 `convert_time` 并**验证线性**，不自己按 tempo 算
 

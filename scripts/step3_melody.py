@@ -57,7 +57,7 @@ from svagent.compose.checks import (MAJOR, MINOR, NAMES, CheckCfg, Note,
                                     check_range, note_name)
 from svagent.compose.harmonize import HarmonyPlan, harmonize
 from svagent.compose.lyricfile import parse
-from svagent.compose.melodize import melodize_spec
+from svagent.compose.melodize import melodize_spec, phrases_of
 from svagent.compose.repair import Ctx, cost, repair
 from svagent.compose.spec import expand_many, motif_name
 from svagent.compose.uniqueness import Fingerprint, report
@@ -538,6 +538,24 @@ def main() -> int:
         old_name, old_notes, _old_secs = read_lead(PROJECT, ver, FORM)
         scope = [x.strip() for x in a.sections.split(",") if x.strip()]
         lead_notes, srep = SG.splice(old_notes, best.notes, scope, ver, FORM)
+
+        # 拼接会在段落交界处留下问题（实测：句末落音）。跑一次自修复，
+        # **然后再拼一次** —— 修复可能动到范围外的音符，
+        # 而「没点名的段落逐字段不变」是这一项的验收判据，不能为修复让路。
+        merged_secs = sections_from(lead_notes, ver, FORM)
+        ph2 = phrases_of(merged_secs, infer_key([n.midi for n in lead_notes])[0])
+        ctx2 = Ctx(text="".join(t for _s, _b, ls in merged_secs
+                                for t, _y, _c in ls),
+                   key_root=infer_key([n.midi for n in lead_notes])[0],
+                   quality=infer_key([n.midi for n in lead_notes])[1],
+                   phrases=ph2, cfg=cfg)
+        before_fix = len(ctx2.check(lead_notes))
+        if before_fix:
+            r = repair(lead_notes, ctx2)
+            if len(r.final) < before_fix:
+                lead_notes, _ = SG.splice(old_notes, r.notes, scope, ver, FORM)
+                print(f"  拼接后自修复　{before_fix} → {len(r.final)} finding")
+
         lead_sections = sections_from(lead_notes, ver, FORM)
         lead_name = old_name          # 大部分还是原来那条旋律，名字不改
         kr2, kq2, _kn = infer_key([n.midi for n in lead_notes])

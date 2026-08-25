@@ -114,7 +114,7 @@ def main() -> int:
         return 2
     print("  ✓ 全部同源")
 
-    # 整句贴合度：这是七项检查目前**没有**的一项，只报告不拦
+    # 整句贴合度：这是八项检查目前**没有**的一项，只报告不拦
     weak = []
     for sec_name, _b, lines in conv:
         for text, syls, (root, q) in lines:
@@ -126,7 +126,7 @@ def main() -> int:
     if weak:
         print()
         print(f"⚠ {len(weak)} 句的和弦音占比低于 30% —— 加了伴奏之后"
-              "这几句的和声感会偏模糊。**七项检查目前没有这一项**：")
+              "这几句的和声感会偏模糊。**八项检查目前没有这一项**：")
         for s, t, c, f in weak:
             print(f"    {s}「{t}」配 {c}，只有 {f*100:.0f}% 是和弦音")
 

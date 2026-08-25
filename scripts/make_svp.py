@@ -55,7 +55,7 @@ def main() -> int:
     tag = a.song_module.replace("melody_", "")
     notes, phrases, text = mod.build()
 
-    # 写之前先过一遍七项检查。有 block 就不写 —— 和 write_song.py 一致
+    # 写之前先过一遍八项检查。有 block 就不写 —— 和 write_song.py 一致
     fs = run_all(notes, text, mod.KEY_ROOT, mod.KEY_QUALITY, phrases, CheckCfg())
     print("=== 写入前自检 ===")
     print("  " + summarize(fs).replace("\n", "\n  "))

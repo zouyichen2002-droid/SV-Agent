@@ -6,7 +6,10 @@
 缺的是能感知**整体**的判据。这个模块补的就是那一类，同时把「算术类」问题
 从人耳的工作量里拿掉 —— 创作者应该只判音乐性，不该去数字数、查音域、听倒字。
 
-## 七项检查，分两类
+## 八项检查，分两类
+
+**`run_all` 返回八项。** 独特性（`uniqueness.py`）单独跑，不在这里 ——
+它要和别的作品比，需要外部输入，和这八项的「只看这一首」不是一回事。
 
 **客观类**（对错分明，超了就是错）
 
@@ -95,7 +98,7 @@ class Phrase:
 
 @dataclass
 class Finding:
-    kind: str               # count / range / leap / scale / cadence / phrase / prosody
+    kind: str               # count/range/leap/scale/cadence/phrase/prosody/chord_fit
     severity: str           # block / warn / info
     where: str
     detail: str
@@ -159,6 +162,11 @@ class CheckCfg:
     leap_max_semitones: int = 9            # 大六度
     scale_in_key_min: float = 0.90
     phrase_gap_max_beats: float = 1.0      # 乐句内相邻音符的最大间隔
+    # 整句与和弦的贴合度下限。**按时长加权**，见 check_chord_fit。
+    # 实测《晓风残月》（已验收）20 句里按时长最低 35%、中位 55%，
+    # 所以 0.30 能让它全过而又留得住真正跑调的句子。
+    # 若改成按个数加权，同一首歌会有 4 句低于 30% —— 那是台假阳性机器。
+    chord_fit_min: float = 0.30
     prosody: ProsodyCfg = field(default_factory=ProsodyCfg)
 
 
@@ -393,6 +401,70 @@ def check_prosody(notes: list[Note], text: str, cfg: CheckCfg,
 
 # ---------------------------------------------------------------- 汇总
 
+def check_chord_fit(notes: list[Note], phrases: list[Phrase],
+                    cfg: CheckCfg) -> list[Finding]:
+    """第九项：**整句与和弦的贴合度**，按时长加权。
+
+    ## 为什么是时长加权而不是个数
+
+    实测《晓风残月》（已验收、其余七项 0 finding）：
+
+        按个数   中位 44%，4 句低于 30%
+        按时长   中位 55%，0 句低于 30%
+
+    差别来自经过音 —— 短的非和弦音在听感上是装饰，长的才真的糊掉和声。
+    按个数算会把一首已经通过验收的歌判出 4 处问题，
+    **那不是严格，那是假阳性**。
+
+    ## 它补的是哪一块
+
+    `check_scale` 只看音在不在调内，`check_cadence` 只看句末落音。
+    中间那一段「整句是不是贴着这个和弦走」两者都不管 ——
+    创作者说「和声感模糊」时，指的就是这里。
+    """
+    out = []
+    for ph in phrases:
+        if ph.chord_root is None:
+            continue
+        if ph.note_to > len(notes) or ph.note_from >= len(notes):
+            out.append(Finding("chord_fit", "warn", f"乐句 {ph.index}",
+                               "乐句下标越界，无法计算贴合度"))
+            continue
+        seg = [n for n in notes[ph.note_from:ph.note_to] if n.duration_beats > 0]
+        if not seg:
+            continue
+        triad = (0, 4, 7) if ph.chord_quality == "major" else (0, 3, 7)
+        pcs = {(ph.chord_root + t) % 12 for t in triad}
+        total = sum(n.duration_beats for n in seg)
+        inside = sum(n.duration_beats for n in seg if n.midi % 12 in pcs)
+        ratio = inside / total if total else 0.0
+        if ratio < cfg.chord_fit_min:
+            out.append(Finding(
+                "chord_fit", "warn", f"乐句 {ph.index}",
+                f"和弦音只占 {ratio:.0%} 的时长"
+                f"（下限 {cfg.chord_fit_min:.0%}）—— 这一句听起来会离和声",
+                score=cfg.chord_fit_min - ratio,
+                targets=tuple(range(ph.note_from, ph.note_to))))
+    return out
+
+
+def chord_fit_ratios(notes: list[Note], phrases: list[Phrase]) -> list[float]:
+    """每个乐句的贴合度。**给诊断层当原料** —— 不触发也要拿得到数。"""
+    out = []
+    for ph in phrases:
+        if ph.chord_root is None or ph.note_to > len(notes):
+            continue
+        seg = [n for n in notes[ph.note_from:ph.note_to] if n.duration_beats > 0]
+        if not seg:
+            continue
+        triad = (0, 4, 7) if ph.chord_quality == "major" else (0, 3, 7)
+        pcs = {(ph.chord_root + t) % 12 for t in triad}
+        total = sum(n.duration_beats for n in seg)
+        inside = sum(n.duration_beats for n in seg if n.midi % 12 in pcs)
+        out.append(inside / total if total else 0.0)
+    return out
+
+
 def run_all(notes: list[Note], text: str, key_root: int, quality: str,
             phrases: list[Phrase], cfg: CheckCfg | None = None
             ) -> list[Finding]:
@@ -405,6 +477,7 @@ def run_all(notes: list[Note], text: str, key_root: int, quality: str,
     fs += check_cadence(notes, phrases)
     fs += check_phrase(notes, phrases, cfg)
     fs += check_prosody(notes, text, cfg, phrases)
+    fs += check_chord_fit(notes, phrases, cfg)
     order = {"block": 0, "warn": 1, "info": 2}
     return sorted(fs, key=lambda f: (order[f.severity], -f.score, f.kind))
 

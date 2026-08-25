@@ -115,7 +115,7 @@ def _h_checks(proj) -> HookResult:
     for f in fs:
         by[f.kind] = by.get(f.kind, 0) + 1
     return HookResult("checks", not fs,
-                      "七项检查 0 finding" if not fs else f"{len(fs)} finding：{by}",
+                      "八项检查 0 finding" if not fs else f"{len(fs)} finding：{by}",
                       {"findings": len(fs), "by_kind": by})
 
 
