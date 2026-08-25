@@ -46,10 +46,10 @@ from .agent import idem as ID
 from .agent import safety as SF
 from .agent import safewrite as SW
 from .agent import state as ST
+from .agent import tree as TR
 
 # 还没建造的面板：名字 · 属于第几项 · 一句话说明。**只列，不画。**
 PENDING_PANELS = [
-    ("会话树", 3, "分支 · HEAD · 每个节点的裁决与度量"),
     ("本轮", 5, "诊断 → 假设 → 动作 → 度量前后对比"),
     ("指标", 7, "八项检查 + 三个新指标的当前值与阈值"),
 ]
@@ -166,6 +166,7 @@ label.auto { cursor: pointer; user-select: none; }
 .lnm { font-weight: 500; min-width: 74px; color: var(--fg); }
 .ldt { color: var(--fg2); }
 .lamp.off .ldt { color: var(--block); }
+b.here { font-weight: 500; color: var(--accent); margin-left: 10px; }
 .lhint { flex: 1 1 100%; padding-left: 93px; color: var(--fg3);
          font-size: 12.5px; }
 .fl { display: flex; gap: 8px; font-size: 12.5px; padding: 2px 0 2px 93px;
@@ -270,6 +271,56 @@ def _safety_panel(sf: SF.SafetyState) -> str:
     return (f'<h2>安全　第 1 项</h2><div class="card">{"".join(rows)}</div>')
 
 
+def _tree_panel(t: TR.Tree) -> str:
+    """会话树（第 3 项）—— 架构文档说这是创作者最常看的一屏。
+
+    缩进直接用节点深度，不画连线：HTML 里画树线要么用图片要么用一堆边框，
+    而这一屏的价值在于**看懂哪条分支是哪条、现在在哪、哪些被否了**，
+    不在于线画得漂不漂亮。
+    """
+    try:
+        nodes = t.nodes()
+    except TR.TreeError as e:
+        return (f'<h2>会话树　第 3 项</h2><div class="card"><div class="lamp off">'
+                f'<span class="dot"></span><span class="ldt">'
+                f'日志读不了：{_e(e)}</span></div></div>')
+    if not nodes:
+        return ('<h2>会话树　第 3 项</h2><div class="card"><div class="lamp '
+                'unknown"><span class="dot"></span><span class="ldt">'
+                '还没有任何节点　—　跑 tree.py --commit "标签" 存第一个'
+                '</span></div></div>')
+
+    head = t.head()
+    depth: dict[str, int] = {}
+    rows = []
+
+    def walk(nd, d):
+        depth[nd.id] = d
+        cls = {TR.ACCEPTED: "on", TR.REJECTED: "off"}.get(nd.verdict, "unknown")
+        rows.append(
+            f'<div class="lamp {cls}" style="padding-left:{d * 22}px">'
+            f'<span class="dot"></span>'
+            f'<span class="lnm mono">{_e(nd.id)}</span>'
+            f'<span class="ldt">{_e(nd.label)}　{_e(nd.when)}'
+            + (f'　「{_e(nd.verdict_note)}」' if nd.verdict_note else "")
+            + ('<b class="here">← 你在这</b>' if nd.id == head else "")
+            + "</span></div>")
+        for k in t.children(nd.id):
+            walk(k, d + 1)
+
+    for r in t.roots():
+        walk(r, 0)
+    dirty = ('<div class="lamp off"><span class="dot"></span>'
+             '<span class="lnm">有未提交的改动</span><span class="ldt">'
+             '文件与当前节点不一致 —— 切走之前会自动存一个节点</span></div>'
+             if t.is_dirty() else "")
+    bad = len(t.rejected())
+    foot = (f'<div class="fl" style="padding-left:0"><span>{len(nodes)} 个节点'
+            f'　{bad} 个被否决（否决记忆的原料）</span></div>')
+    return (f'<h2>会话树　第 3 项</h2><div class="card">'
+            f'{dirty}{"".join(rows)}{foot}</div>')
+
+
 def _actions_panel() -> str:
     """动作表（第 2 项）：每个动作一行，标幂等 ✓/✗。
 
@@ -351,6 +402,7 @@ def render(st: ST.ProjectState, *, refresh_s: int = 5,
     for s in st.steps:
         body.append(_step_card(s, is_next=bool(nx and s.n == nx.n)))
 
+    body.append(_tree_panel(TR.Tree(st.proj)))
     if sf is not None:
         body.append(_safety_panel(sf))
     body.append(_actions_panel())
