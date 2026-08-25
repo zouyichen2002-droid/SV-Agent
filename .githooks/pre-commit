@@ -1,0 +1,4 @@
+#!/bin/sh
+# 提交前的凭据扫描。**机制不会忘，我会。**
+# 启用：git config core.hooksPath .githooks
+exec python "$(git rev-parse --show-toplevel)/scripts/scan_secrets.py"
