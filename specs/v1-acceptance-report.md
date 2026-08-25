@@ -34,8 +34,12 @@
 | 9 | 库边界 · 统一 CLI · 斜杠命令 | `session.py` `scripts/sv.py` `.claude/commands/` |
 | 10 | Mistral 客户端 + tool-calling 循环 | `llm.py` `agent/loop.py` |
 
-规模：`toolkit/svagent/` 约 7,000 行，`tests/` 2,912 行，
-`specs/` 3,442 行。**测试是代码量的 40%。**
+规模（实测）：
+
+    toolkit/svagent/         11,004 行   含此前建好的 L1 能力层
+      └ agent/                3,776 行   **这一轮新建的 agent 层**
+    tests/                    2,912 行   占库代码的 26%
+    specs/                    3,442 行   23 份文档，其中 13 份 ADR
 
 ---
 
