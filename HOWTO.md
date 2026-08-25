@@ -1,223 +1,242 @@
-# SV-Agent 创作运行手册
+# SV-Agent 使用手册
 
-**这份文档的用途：让一个全新的 Claude Code 会话能接着做歌。**
-第一句话就把它贴给我，或者直接说「读 `E:\sv-bridge\HOWTO.md`，我要做新歌」。
-
-第一轮完整走通的作品：《晓风残月》（`songs/xiaofeng`），
-六步全过，对齐误差 −1.0 ms。设计理由见 [specs/workflow.md](specs/workflow.md)。
-
----
-
-## 开一首新歌：三件事
-
-### 1. 你做（约 2 分钟）
-
-- 在 SynthV 里**新建一个空工程并保存**，比如 `E:\我的歌\yequ.svp`
-- 告我：**题目 + 那个 svp 的路径**
-
-### 2. 我做
-
-建配置目录，之后所有命令都靠环境变量 `SVAGENT_SONG` 选歌：
-
-```bash
-python -c "import sys; sys.path.insert(0,r'E:\sv-bridge\toolkit'); from svagent import project; print(project.scaffold('yequ','夜曲',r'E:\我的歌\yequ.svp',bpm=66))"
-```
-
-**每首新歌只改 `songs/<slug>/project.json`，不改代码。** 里面是：
-
-| 字段 | 说明 |
+| | |
 |---|---|
-| `title` | 歌名 |
-| `svp` | SynthV 工程的绝对路径（**你新建的那个**） |
-| `bpm` | 48 小节时：62→3:06　66→2:54　70→2:45 |
-| `form` | 曲式。默认 48 小节；超过 3:30 要加桥段或第三段副歌 |
-
-`mid` / `wav` 不用填，默认跟着 `svp` 起名。
-
-### 3. 结构模板只需要一次
-
-`songs/_template/empty_v196.svp` 是你空工程的纯净副本，已经有了。
-**只有 SynthV 大版本升级后才需要换**——那时重新建个空工程，复制过去。
+| 更新 | 2026-08-25，十项建造完成、《风筝线》端到端跑通之后 |
+| 给谁看 | **创作者**（不写代码），以及接手这个项目的下一个 agent |
+| 一句话 | 你说人话，agent 干活；**每一步都可度量、可回滚** |
 
 ---
 
-## 随时看一眼：仪表盘
+## 0. 你只需要记住三条命令
 
-任何时候想知道「这首歌走到哪了、卡在哪、下一条命令是什么」，生成一张页面：
+真正日常会用的就这三条。其余全是它们的展开。
 
-    SVAGENT_SONG=<slug> python E:\sv-bridge\scripts\dashboard.py --open
+```bash
+python E:/sv-bridge/scripts/sv.py state          # 这首歌到哪了、下一步谁做
+python E:/sv-bridge/scripts/sv.py dash --open    # 一张网页看全部：状态/树/安全/指标/诊断
+python E:/sv-bridge/scripts/sv.py why "副歌不够爆"  # 说一句人话，它诊断
+```
 
-它写出 `songs/<slug>/dashboard.html` 并用浏览器打开，**每 5 秒自动刷新**
-（右上角可以关掉）。所以做歌时把它开在另一个窗口，每跑完一步就会自己更新。
+**更省事的办法：在 Claude Code 对话里打斜杠命令**，不用记路径：
 
-页面上的数字全部来自 `state.inspect()`，**是从文件现算的，不是记下来的** ——
-你在 SynthV 里手改了工程，刷新一下就能看见。
-
-第一版只读：所有操作还是在对话里说（「回到上一版」「这版不行」）。
-另外四个面板（安全 / 会话树 / 本轮 / 指标）还没建，页面底部列着它们属于第几项。
+    /sv-state    到哪了
+    /sv-dash     开仪表盘
+    /sv-why      诊断一句诉求
+    /sv-tree     看会话树、回退
+    /sv-safety   五盏灯（怀疑出事了就看这个）
+    /sv-act      看动作池 / 跑一个动作
 
 ---
 
-## 六步
+## 1. 三种用法，按你的场景挑
 
-每一步的完整命令。`SVAGENT_SONG=<slug>` 是必须的前缀。
+### A. 跟 agent 说话（最常用）
 
-### 步骤 1 · 定题目
+在 Claude Code 里直接说人话：「副歌太平」「换个和声」「回到上一版」。
+agent 会自己去调工具、跑检查、把**数字**给你看。
 
-你做两件：① 题目发我　② 新建空 svp 并保存。
+**这是设计的主路径。** 你不需要知道底下有 12 个动作。
 
-### 步骤 2 · 定歌词（在记事本里改）
+### B. 自己敲命令
 
-我出 **2 版**（不是 6 版——歌词要逐行读，2 版刚好占满注意力），
-在最大的那条轴上对立，你选一版或让我重出。
-
-歌词文件：`songs/<slug>/lyrics.txt`，**UTF-8 带 BOM + CRLF**（否则记事本乱码）。
+想自己掌控节奏时用 `sv.py`。每个子命令都有 `--json`（给脚本用的）。
 
 ```bash
-SVAGENT_SONG=yequ python E:\sv-bridge\toolkit\svagent\compose\lyricfile.py
+python E:/sv-bridge/scripts/sv.py --song zhuimeng state
 ```
-检查格式与字数。改法写在文件开头：保留行首和弦、每行 8–10 字、
-和弦只用 `Am Dm Em C F G`（是**级数**不是绝对音高，换调会一起转）。
 
-**歌词文件是和声进行的唯一真相来源。** 不能从旋律反推（实测准确率只有 35%）。
+不给 `--song` 就用**最近改动过的那首**。
 
-### 步骤 3 · 定主旋律和和声（在 SynthV 里听）
+### C. 让模型自己跑一轮
 
 ```bash
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step3_melody.py
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step3_melody.py --write --closed
+python E:/sv-bridge/scripts/sv.py ask "帮我看看这首歌还差什么"
 ```
 
-出**一条**主旋律 + 多条和声轨（不是 6 版——SynthV 不支持同轨重叠，
-和声必须分轨；而且迭代比选择更贴合创作）。
-
-局部修改：
-
-```bash
-# 只换和声，主旋律一个音符不动
-... step3_melody.py --keep-melody --harmony 低八度 --write --closed
-# 和声也覆盖预副
-... step3_melody.py --harmony 低八度,下三度 --harmony-sections 副歌,预副 --write --closed
-```
-
-和声可选 `低八度 / 下三度 / 上三度 / 下六度`。
-
-### 步骤 4 · 定伴奏（在 FL 里配器）
-
-```bash
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step4_accompaniment.py --write
-```
-
-出伴奏 MIDI。然后**你在 FL 里做三件**（FL API 不允许加载插件，只能手动）：
-
-1. 文件 → 导入 → MIDI 文件
-2. **确认走带 tempo = 配置里的 bpm**（FL 常常不采用文件里的 tempo，
-   这是唯一会毁掉全链路的错）
-3. 五条轨挂音源。你的 FL 是 **Producer Edition**，
-   零风险方案是 **FLEX + General Midi Library**（GM 音色号天然对得上）
-   + **FPC**（鼓）：
-
-   | 轨 | 搜什么 |
-   |---|---|
-   | Pad | `Warm Pad` / `Harmo Pad` |
-   | Bass | `bass`（Acoustic Bass 也很好） |
-   | Arp | `Crystal` / `bell` |
-   | Counter | `Choir Aahs` |
-   | Drums | FPC，或 GM 库里的 `kit` |
-
-4. 导出 → Wave 文件 → 配置里的 `wav` 路径。
-   **完整歌曲 / 44100 / 关归一化。**
-
-### 步骤 5 · 伴奏进 SV + 调教
-
-```bash
-# 先验对齐（不通就别往下走）
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step5_assemble.py
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step5_assemble.py --write --closed
-# 再调教
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step5_tune.py
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step5_tune.py --write --closed
-```
-
-对齐判据：**实际偏移 ≤10 ms 且三段极差 ≤5 ms**。
-偏移是常量可以修（挪音频轨），**漂移不行**（tempo 不一致，回 FL 重渲）。
-
-调教强度：`--scale 0.6` 调松，`--harmony-scale 0.3` 单独压和声，
-`--clear` 全部清空。
-
-### 步骤 6 · 混音
-
-```bash
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step6_mix.py
-SVAGENT_SONG=yequ python E:\sv-bridge\scripts\step6_mix.py --write --closed
-```
-
-只改 `.svp` 的 EQ / 压缩 / 混响 / gain / pan，**音频文件一个字节不动**，
-`--clear --write --closed` 一键撤销。
+模型读上下文 → 调工具 → 看数字 → 给结论。
+**每分钟只有 4 次请求**（Mistral 免费档实测），所以它一轮只做一件事。
 
 ---
 
-## 三条硬规则
+## 2. 开一首新歌
 
-### 1. 写 svp 前必须关掉 SynthV
+**你只做三件事**：给一句主题、选一版歌词、在 FL 里配器导出。其余我做。
 
-所有写工程的脚本**默认拒绝**，必须显式加 `--closed`；检测到 SynthV 进程
-在跑还会再拦一次。
+### 你给一句主题
 
-理由：SynthV 开着文件时我写盘，它内存里的旧内容可能被你「保存」回去，
-**覆盖掉我刚写的**。实测差点发生过。
+就一句话。**越具体越好写** ——「末班地铁上给自己写的信」比「孤独」好写十倍。
+抽象主题不是不能写，但要接受它更容易写成口号。
+
+我会建好 `songs/<slug>/project.json`、从模板生成空 `.svp`。
+**你不用在 SynthV 里手工建工程。**
+
+### 你选一版歌词
+
+我出 2 版候选（一次请求出完，不是两次）。你选一版，可以直接改字。
+我修字数、韵脚、口号句，再写进 `songs/<slug>/lyrics.txt`。
+
+**这个文件永远是你的。** 想改随时改，改完跟我说一声，我重跑旋律。
+
+### 我做旋律与和声
+
+八项检查必须 0 finding 才往下走。
+
+### 你在 FL 里三步 ← **唯一非你不可的一段**
+
+1. `File → Import → MIDI file`，选 `<歌名>_伴奏.mid`
+2. **按通道拆分**，把 5 个 pattern 拖进播放列表，**都对齐第 1 小节**
+3. 逐条挂音源，导出到 `<歌名>_伴奏.wav`
+
+为什么必须你来：**FL 的脚本 API 不能加载插件**
+（原文 *"We cannot load NEW plugins (FL API limit)"*，见事实 F04）。
+任何 agent 都替不了这一步。
+
+音源只推荐你有的（Producer 版：**FLEX · General MIDI Library · FPC**，事实 F05）。
+
+### 我做剩下的
+
+挂音频轨 → **验对齐** → 调教 → 混音。
+
+**对齐不过我不往下走** —— 对不上的话后面全是白做。
+判据：偏移 ≤10 ms 且三段极差 ≤5 ms。
+
+---
+
+## 3. 改一首已有的歌
+
+### 说一句人话就行
+
+```bash
+python E:/sv-bridge/scripts/sv.py why "副歌不够爆"
+```
+
+它会做三件事之一：
+
+| 它说什么 | 意思 |
+|---|---|
+| 给你几个假设 + 提案 | 指标上看得出问题，它有把握 |
+| **「不猜，问你」** | **指标看不出问题，或者两个原因分不开** |
+| 「认不出这句话」 | 第一版只敢自动诊断三类，其余一律问 |
+
+**第二种不是缺陷，是设计。** 一个会说「我不确定」的诊断层是可用的，
+自信瞎猜的不是。这时候你多给一句具体的（哪一段、什么感觉），或者直接告诉我改哪里。
+
+### 想让它真的试
+
+```bash
+python E:/sv-bridge/scripts/diagnose.py "副歌不够爆" --trial
+```
+
+三个假设**各自在隔离副本里**跑一个动作，量完并排给你看。**真工程不动。**
+满意了再加 `--apply`。
+
+### 只改一段
+
+```bash
+python E:/sv-bridge/scripts/sv.py act gen_melody --params '{"scope": ["副歌"]}'
+```
+
+**只重生成副歌，其余段落逐字段不变。** 局部修改是归因的前提 ——
+整首重生成之后，你说「好听了」我也不知道是哪一处起的作用。
+
+### 从旧版本取一段
+
+```bash
+python E:/sv-bridge/scripts/sv.py act pick --params '{"from_node":"n0003","sections":["副歌"]}'
+```
+
+「回到上一版的副歌，但保留现在的调教」—— 这不是 merge，是取第 N 段。
+
+---
+
+## 4. 出事了怎么办
+
+### 先看五盏灯
+
+```bash
+python E:/sv-bridge/scripts/safety.py
+```
+
+    ✓ 原子写      有没有崩溃残留
+    ✓ 哈希校验    **你手改过的文件，我会拒绝覆盖**
+    ✓ 全套快照    存了几个、去重省了多少
+    ✓ 可中断      有没有请求停止
+    ✓ 循环超时    预算还剩多少
+
+**灰灯不是坏事**，是「还没有可判断的依据」。别把它当问题。
+
+### 哈希那盏灯红了
+
+说明你在 SynthV / 记事本里改过东西。两条路，**都会先自动拍快照，怎么选都丢不了**：
+
+```bash
+python E:/sv-bridge/scripts/safety.py --adopt      # 以你的版本为准
+python E:/sv-bridge/scripts/safety.py --restore c001  # 回滚到某个快照
+```
+
+### 回到之前某一版
+
+```bash
+python E:/sv-bridge/scripts/tree.py                    # 看树
+python E:/sv-bridge/scripts/tree.py --checkout n0003   # 回去
+```
+
+**切走之前会自动存一个节点**，所以随便切。
+
+### 让它停下来
+
+```bash
+python E:/sv-bridge/scripts/safety.py --stop     # 下一个动作之前退出
+python E:/sv-bridge/scripts/safety.py --resume
+```
+
+它**只在两个动作之间退出**，不会掐断正在写的文件。
+
+### 不满意某一版，告诉它
+
+```bash
+python E:/sv-bridge/scripts/tree.py --verdict n0003 rejected "太满了"
+```
+
+被否决的节点带着**规格特征 + 你的原话**留下来 —— 那是记忆层的原料。
+
+---
+
+## 5. 三条硬规则
+
+### 1. 写 `.svp` 前必须关掉 SynthV
+
+SynthV 开着该文件时我写盘，它内存里的旧内容可能被你保存回去**覆盖掉**。
+所有写动作都要 `--closed` 确认，检测到 SynthV 在跑直接拦住。
 
 ### 2. 一个项目一套文件，改动写回原处
 
-不因为修改就新建文件。四个文件固定：
+一个 txt、一个 svp、一个 FL 工程。不因为改动就新建文件。
+安全网是快照与会话树，不是文件名后缀。
 
-    songs/<slug>/lyrics.txt      歌词
-    <svp>                        SynthV 工程（成品）
-    <svp 同名>_伴奏.mid          伴奏 MIDI
-    <svp 同名>_伴奏.wav          FL 渲染的伴奏（**别挪**，工程按绝对路径引用）
+### 3. 你随时可以手改，但改完说一声
 
-每次写前自动备份到 `<svp 目录>/_backup/`，带时间戳。
+FL、SynthV、歌词 txt 三处你都可以随时动（事实 F16）。
+哈希校验会发现，然后**拒绝覆盖**而不是默默盖掉。
 
-### 3. tempo 只在配置里定一次
-
-一个 SynthV 工程只有一条时间轴。BPM 是**歌曲级决定**，
-不能作为版本间的差异。改 BPM 就改 `project.json` 然后重跑步骤 3 起。
+但**跟我说一声更省事** —— 否则我下一个动作会被拦住，我们要多绕一圈。
 
 ---
 
-## 永久手动的部分（工具能力边界，不是待办）
+## 6. 想知道更多
 
-| 环节 | 为什么 |
+| 文件 | 内容 |
 |---|---|
-| 新建 svp | SynthV 桥 64 个动作里没有 new/open project |
-| FL 导入 MIDI、挂音源、导出音频 | **FL 脚本 API 不允许加载插件**（工具自己写的） |
-| 四道验收（词/旋律/编排/成品） | 你是判据本身，不是瓶颈 |
+| `specs/facts.md` | **17 条环境硬约束**，每条都写了「不知道会怎样」和「怎么学到的」 |
+| `specs/agent-architecture-v1.md` | 架构。为什么这么设计 |
+| `specs/v1-acceptance-report.md` | 验收报告。**做了什么、量到了什么、还缺什么** |
+| `specs/testing-and-acceptance.md` | 每一项的判据与实测数字 |
+| `specs/adr/` | 13 份决策记录。每份都写了「什么证据会推翻它」 |
 
-反过来，**这些原本以为要手动的其实不用**：指派声库、加音频轨、保存
-（都写进 `.svp` 字段）；调教与混音（同上）。
+### 一句话概括这套东西的取向
 
----
-
-## 已经踩过的坑（不要重犯）
-
-| 坑 | 现在怎么防 |
-|---|---|
-| 句长独立随机 → **同轨重叠 57 处 + 11.5 秒断气音** | 每句小节数从曲式推导；末字长音上限 4 拍 |
-| 「和声出界就移八度」→ **回到原音变成同音齐唱** | 改成换音程，并如实报出实际构成 |
-| 声库只挂 `groups[].database` → 界面显示「未设置默认歌声」 | 同时挂 `mainRef.database` |
-| 从别人的 `.svp`（v187）反推 schema → 少六处字段 | 以你的空工程（v196）为模板注入 |
-| `hash()` 每进程加盐 → 只想改和声却连旋律一起变 | 改用 `zlib.crc32`；并提供 `--keep-melody` |
-| 把「插件数据库」当已授权列表 → 推荐了 All Plugins 版的插件 | 只推 FLEX + FPC + 核心自带 |
-| 拿成品伴奏当试听垫 → 「听起来都一样」 | 步骤 3 直接在 SynthV 里用星尘听 |
-| 无 BOM 的 UTF-8 → 记事本乱码 | 歌词写 `utf-8-sig` + CRLF |
-
----
-
-## 还缺的（想做时告我）
-
-- **第九项检查：整句与和弦的贴合度。** `check_cadence` 只看末音；
-  《晓风残月》有 4 句和弦音占比低于 30%（最低 12%），加伴奏后和声感偏模糊。
-- **乐谱驱动的闪避 + 母带 LUFS 归一。** 要重写伴奏 wav，属于混音的下一档。
-- **步骤 2 的歌词目前是我手写的**，不是生成的。接 Mistral API 是下一步。
-- **零自动化测试。** 敏感度测试只是临时跑的命令行。
-- **remix** 连定义都还没有（注意：V 家流程最后那步是混音，remix 是另一件事）。
+> **模型负责品味，检查负责正确。**
+>
+> 所以每个动作返回的不是「执行成功」，是 `findings 前后 / 改了几个音符 / 对齐偏移多少毫秒`。
+> 你和模型都看数字决定下一步，不看谁的自我感觉。
