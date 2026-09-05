@@ -6,7 +6,7 @@
 > The contribution here is **not the model and not the code — it is a verifiable
 > workflow**: every step produces a number, every number has a threshold calibrated
 > against work a human already accepted, and every threshold has a test that proves
-> it fires. 212 tests, 18 machine-checked environment constraints, 13 ADRs,
+> it fires. 242 tests, 18 environment constraints (8 machine-checked), 13 ADRs,
 > two songs taken end-to-end.
 
 ---
@@ -41,6 +41,7 @@
 | 仪表盘是快照不是视图 | 改了歌词，页面**理直气壮地显示两小时前的数字** |
 | `PJ.current()` 按字母序取最后一个 | 新建一首歌，**默认项目静默变成了另一首** |
 | 检查器自己崩了 | 一个 finding 都不报 —— **看起来像「全过」** |
+| 新动作的产物漏进 `sources` | 写出 105879 字节，**动作报 `ok=True` 且钩子一个没跑** —— 没入账、没有回退点 |
 
 **没有一个能被「跑一遍看输出」抓到。** 输出全是正常的。
 
@@ -86,15 +87,24 @@
 ① 定题目      创作者给一句主题
 ② 定歌词      agent 出候选 → 创作者拍板 → agent 修字数/韵脚
 ③ 定旋律和声  agent。八项检查 0 finding 才往下走
-④ 定伴奏      agent 出 MIDI → 创作者在 DAW 里配器导出
+④ 定伴奏      agent 出 MIDI + 拼出带配器的 FL 工程 → 创作者按导出
 ⑤ 装配调教    agent。对齐 ≤10 ms 才往下走
 ⑥ 混音        agent
 ```
 
-**第 ④ 步的手工部分不是偷懒，是硬约束。**
-FL Studio 的脚本 API 不能加载插件（原文 *"We cannot load NEW plugins (FL API limit)"*）——
-任何 agent 都替不了「导入 MIDI」和「挂音源」。这条记在环境事实 F04 里，
-连同另外 17 条：为什么必须这样、不知道会怎样、**怎么学到的**。
+**第 ④ 步曾经是整条链上唯一绕不过的人工环节**，理由记在环境事实 F04：
+「FL 的脚本 API 不能加载插件，所以挂音源谁也替不了」。
+
+后来发现那条**根本没验证过** —— 唯一来源是某个第三方工具自己的说明。
+而且就算它是真的也不重要：[ADR-0013](specs/adr/0013-write-flp-directly.md)
+走的是另一条路 —— **直写 `.flp`，把插件状态块原样搬运，压根用不到脚本 API**。
+
+`.flp` 里的插件状态是不透明的二进制块（最大一块 28494 字节）。
+要保住创作者挂好的音源，**不需要看懂它，只需要别碰它**。
+于是「逐条挂音源」从每首歌一次，变成了**一辈子一次**（做模板那次）。
+
+这件事本身是个教训：**一条没验证的断言，会安静地把一整类方案提前否掉。**
+F04 现在改成了「有人说……至今没有一手确认」，并写明了怎么才能定论。
 
 第 ③⑤ 步的「不往下走」也是硬的：**对不上的话后面全是白做。**
 
@@ -109,7 +119,7 @@ FL Studio 的脚本 API 不能加载插件（原文 *"We cannot load NEW plugins
 2  幂等性测试 + 语义归一化
 3  会话树（journal · HEAD · 隐式分支 · 裁决）
 4  环境事实归集（能自动复验的必须自动复验）
-5  工具层（12 个动作 · JSON Schema · 写后钩子）
+5  工具层（14 个动作 · JSON Schema · 写后钩子）
 6  按段落取音符（局部重生成 + cherry-pick）
 7  两个新指标 + 第九项检查
 8  诊断层 · 并行假设 · Plan mode
@@ -151,6 +161,7 @@ git config core.hooksPath .githooks
 - 「太像上一首」需要参照曲，还没接
 - 仪表盘只读；`adjust_spec` 只暴露了音区偏移
 - 端到端只走过一首新歌。**验证方法本身还需要更多真实使用来检验**
+- FL 那边：**tempo 事件位置没找到**（两首歌恰好同为 66 BPM 所以还没暴露）；播放列表没动；换配器只能在模板已有的音色间重排；**导出 wav 仍要创作者按一下** —— FL 有没有命令行渲染至今没确认
 
 完整清单见 [`specs/v1-acceptance-report.md`](specs/v1-acceptance-report.md) 第 4 节。
 
@@ -164,7 +175,7 @@ toolkit/svagent/         库。业务逻辑只在这里
   compose/               作曲能力（检查 · 生成 · 修复 · 调教 · 混音）
 scripts/                 薄入口。逻辑一行都不在这里
 specs/                   规格 · 13 份 ADR · 环境事实 · 验收报告
-tests/                   212 个测试
+tests/                   242 个测试
 .githooks/               提交前凭据扫描
 ```
 
@@ -179,7 +190,8 @@ tests/                   212 个测试
   上游 [`SynthVCopilot/synthv-agent-bridge`](https://github.com/SynthVCopilot/synthv-agent-bridge)（Apache-2.0）
   是最初的方案，**现已不在主链路**；`toolkit/svagent/bridge.py` 保留但不被引用
 - FL 桥同样移出主链路（[ADR-0011](specs/adr/0011-drop-fl-bridge-from-v1.md)）——
-  它的混音工具全部要求「插件已加载」，而 FL 的 API 不允许加载插件
+  它的混音工具全部要求「插件已加载」，而且实测会中途断连。
+  FL 现在走[直写 `.flp`](specs/adr/0013-write-flp-directly.md)，**不经过任何桥**
 - 声库与声学模型不在此仓库，也不再分发
 - 另一条线（**扒歌翻唱**的音高证据流水线）代码在 `eval/`，
   ADR-0001～0003 有记录，目前**暂停**

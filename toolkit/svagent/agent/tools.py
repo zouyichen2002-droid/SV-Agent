@@ -148,9 +148,38 @@ def _h_alignment(proj) -> HookResult:
                       f"三段极差 {rep['spread_ms']:.1f} ms", rep)
 
 
+def _h_flp(proj) -> HookResult:
+    """写完 `.flp` 之后，**回读文件**核对配器还在不在。
+
+    库里 `assert_orch_intact` 已经在写盘前拦过一道，这里再验一遍是因为
+    两者查的不是同一件事：那道查的是「我构造的字节对不对」，
+    这道查的是「落到盘上的文件读回来还对不对」。原子写、杀进程、
+    磁盘满，都只会在第二道露头。
+    """
+    from .. import flp as FL
+    path = proj.acc_flp
+    if not path.exists():
+        return HookResult("flp", None, f"{path.name} 还没有 —— 无从判断")
+    try:
+        doc = FL.read(path)
+        blob = FL.notes_blob(doc)
+    except Exception as e:
+        return HookResult("flp", False, f"回读失败：{type(e).__name__}: {e}")
+    ins = FL.instruments(doc)
+    cnt = FL.channel_counts(blob)
+    # 音源数为 0 = 配器丢了，这正是这个钩子唯一要抓的事
+    return HookResult("flp", bool(ins),
+                      f"{len(ins)} 个音源 · {FL.n_notes(blob)} 音符 · "
+                      f"通道 {cnt}" if ins else
+                      "**一个音源都没有** —— 配器丢了，这份工程打开是空的",
+                      {"instruments": len(ins), "notes": FL.n_notes(blob),
+                       "channels": {str(k): v for k, v in cnt.items()},
+                       "names": [f"{p}／{n}" for p, n in ins]})
+
+
 HOOKS: dict[str, Callable] = {
     "checks": _h_checks, "overlap": _h_overlap,
-    "state": _h_state, "alignment": _h_alignment,
+    "state": _h_state, "alignment": _h_alignment, "flp": _h_flp,
 }
 
 
@@ -321,6 +350,68 @@ def _lead_notes_of(svp_path: Path) -> tuple[str, list[dict]]:
     if name is None:
         raise ToolError(f"{svp_path.name} 里没有「主旋律」轨")
     return name, sorted(back[name], key=lambda n: n["onset"])
+
+
+def _a_build_flp(proj, p) -> dict:
+    """把伴奏 MIDI 装进一份**已配好音源**的 FL 工程。
+
+    创作者原来要做三步：导入 MIDI、逐条挂音源、导出。这个动作吃掉中间那步 ——
+    音源不用重挂，因为模板里的插件状态块被原样搬了过来。
+
+    **模板默认是 `proj.flp`（创作者自己的工程），产物写到 `proj.acc_flp`。**
+    两者刻意分开：覆盖他的工程等于把配器与编排冲掉。
+    """
+    from .. import flp as FL
+    tmpl = Path(p["template"]) if p.get("template") else proj.flp
+    if not tmpl:
+        raise ToolError(
+            "这首歌的 project.json 里没有 flp 字段，也没给 template。"
+            "**需要一份已经挂好音源的 FL 工程当模板** —— "
+            "音源块只能从装过它的工程里搬，凭空造不出来")
+    if not tmpl.exists():
+        raise ToolError(f"模板不存在：{tmpl}")
+    if not proj.mid.exists():
+        raise ToolError(f"伴奏 MIDI 还没有：{proj.mid.name}。先跑 gen_accompaniment")
+
+    mapping = None
+    if p.get("part_to_channel"):
+        mapping = {int(k): int(v) for k, v in p["part_to_channel"].items()}
+
+    data, rep = FL.splice_midi(tmpl, proj.mid, mapping=mapping)
+    g = SW.Guard(proj.agent_dir / "ledger.json")
+    g.write(proj.acc_flp, data)
+    rep["out"] = str(proj.acc_flp)
+    return rep
+
+
+def _a_reorchestrate(proj, p) -> dict:
+    """换配器：**音符一个字节不动，只改哪条通道来演。**
+
+    这是单一变量实验。音高、位置、时值、力度逐字节保持，
+    所以创作者听出来的任何差别都只可能来自音色 —— **能归因，才谈得上迭代**。
+
+    目前只能在模板已有的音色之间重排。要新音色得从别的 `.flp` 里搬状态块，
+    那是另一件事，还没做。
+    """
+    from .. import flp as FL
+    src = Path(p["src"]) if p.get("src") else proj.acc_flp
+    if not src.exists():
+        raise ToolError(f"{src.name} 还不存在。先跑 build_flp")
+    remap = {int(k): int(v) for k, v in p["remap"].items()}
+
+    doc = FL.read(src)
+    n_ch = len(FL.prototypes(FL.notes_blob(doc)))
+    bad = [v for v in remap.values() if v >= n_ch]
+    if bad:
+        raise ToolError(f"目标通道 {bad} 超出范围 —— 这份工程只有 {n_ch} 条"
+                        f"带音符的通道（0~{n_ch - 1}）")
+
+    data, rep = FL.reorchestrate(src, remap)
+    out = Path(p["out"]) if p.get("out") else proj.acc_flp
+    g = SW.Guard(proj.agent_dir / "ledger.json")
+    g.write(out, data)
+    rep["out"] = str(out)
+    return rep
 
 
 def _a_pick(proj, p) -> dict:
@@ -568,6 +659,35 @@ ACTIONS: list[Action] = [
                  "value": {"description": "新值"}},
                 ("track", "field", "value")),
            _a_set_mixer_param, ("overlap",), True),
+
+    Action("build_flp", "把伴奏 MIDI 装进已配好音源的 FL 工程",
+           _obj({"template": {
+                     "type": "string",
+                     "description": "当模板的 .flp（要已经挂好音源）。"
+                                    "留空 = 用 project.json 里的 flp"},
+                 "part_to_channel": {
+                     "type": "object",
+                     "description": '{"声部序号": 通道号}，如 {"0": 3}。'
+                                    "留空 = 按顺序发牌"}}),
+           _a_build_flp, ("flp",), True, READY,
+           "**吃掉「逐条挂音源」那一步。** 插件状态块原样搬运，"
+           "所以模板里有什么音源产物里就有什么。"
+           "写到 `<歌名>_伴奏.flp`，**不覆盖创作者自己的工程**"),
+
+    Action("reorchestrate", "换配器：音符不动，只改哪条通道来演",
+           _obj({"remap": {
+                     "type": "object",
+                     "description": '{"原通道": 新通道}，如 {"0": 3, "3": 0} '
+                                    "把 0 和 3 两条对调。没列出的不动"},
+                 "src": {"type": "string",
+                         "description": "源 .flp，留空 = <歌名>_伴奏.flp"},
+                 "out": {"type": "string",
+                         "description": "输出路径，留空 = 原地改写"}},
+                ("remap",)),
+           _a_reorchestrate, ("flp",), True, PARTIAL,
+           "**单一变量**：音高时值力度逐字节保持，差别只可能来自音色。"
+           "标 partial 是因为只能在模板已有的音色间重排 —— "
+           "要新音色得从别的 .flp 搬状态块，那还没做"),
 ]
 
 BY_NAME = {a.name: a for a in ACTIONS}

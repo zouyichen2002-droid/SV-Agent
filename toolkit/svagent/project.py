@@ -77,6 +77,17 @@ class SongProject:
         return self.agent_dir / ".stop"
 
     @property
+    def acc_flp(self) -> Path:
+        """agent 生成的 FL 工程。**跟 `mid` 一样是派生物，不是创作者的原件。**
+
+        `self.flp` 是创作者手挂音源、手编排的那份，是**模板与素材来源**；
+        这一份是拿它当模板拼出来的产物。两者分开，是因为覆盖 `flp`
+        等于把他一小时的配器与编排冲掉 —— 就算快照能取回文件，
+        他也得重新听一遍才知道丢了什么。
+        """
+        return self.mid.with_suffix(".flp")
+
+    @property
     def sources(self) -> list[Path]:
         """状态由这些文件决定 —— 任何一个变了，观察结果就可能变。
 
@@ -85,7 +96,7 @@ class SongProject:
         表现就是「文件改了但页面不动」，而且不报错。
         """
         out = [config_path(self.slug), TEMPLATE, self.lyrics,
-               self.svp, self.mid, self.wav]
+               self.svp, self.mid, self.wav, self.acc_flp]
         # FL 工程也进来（配置里给了 flp 才有）。**创作者会随时改 FL**
         # （事实 F16），而那一侧我们看不见过程，只能看到导出的 wav 变了。
         # 把 FLP 纳入快照，他的编曲工作才能被回滚 —— 否则一小时的配器

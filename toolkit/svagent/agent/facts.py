@@ -211,11 +211,17 @@ FACTS: list[Fact] = [
          None, MANUAL),
 
     Fact("F04", "FL Studio",
-         "FL 的脚本 API **不能加载插件**，所以「导入 MIDI」和「给轨挂音源」"
-         "永远是手动的",
-         "任何指望自动配器的设计都会卡死在这里（ADR-0011 因此把 FL 桥移出主链路）",
-         "`fl_plugin_list` 工具自己的说明原文：\"We cannot load NEW plugins "
-         "(FL API limit)\"",
+         "**有人说** FL 的脚本 API 不能加载插件 —— 这条至今只有转述，"
+         "**没有一手确认**。不要再拿它当已知事实用",
+         "拿它当铁律，会像本项目那样把「自动配器」整类方案提前否掉 —— "
+         "而 ADR-0013 走另一条路（直写 .flp、搬运插件状态块）就做到了，"
+         "**根本没用到脚本 API**",
+         "唯一来源是 `fl_plugin_list` 工具**自己的说明**："
+         "\"We cannot load NEW plugins (FL API limit)\" —— 那是写那个工具的人的说法，"
+         "不是 Image-Line 的文档。2026-09-05 尝试从二进制导出符号求证，"
+         "**方法失败**：对照组（`getPluginName` 这类肯定存在的 API）"
+         "在所有二进制、所有编码下都是 0 命中，所以查不到 `addPlugin` 不构成证据。"
+         "要定论得在 FL 里跑一次 `dir()` 探针",
          None, MANUAL),
 
     Fact("F05", "FL Studio",
