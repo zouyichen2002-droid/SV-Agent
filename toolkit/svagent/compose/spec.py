@@ -51,6 +51,21 @@ KEYS = [
 
 # 节奏细胞：句内「走字」部分的时长模式，会循环铺满。
 # **这是修 0.987 雍同的核心** —— 原来只有 (0.5,) 一种。
+#
+# ## 细胞的绝对值没有意义，只有比例有意义
+#
+# `melodize._line_rhythm` 会把细胞**等比缩放**去填满预算
+# （`scale = head_budget / sum(head)`），所以 (0.75, 0.25) 与 (1.5, 0.5)
+# 缩放后完全一样。**加「大颗粒细胞」是无效的修法**（我第一次就想错了）。
+#
+# 决定最短音有多短的是**比例落差**：
+#
+#     9 字一句、head_budget 4.55 拍给 8 个字，平均 0.57 拍
+#     (0.75, 0.25) 落差 3:1 → 短音 0.284 拍 = 129BPM 下 **132 ms**
+#     (0.5,)       落差 1:1 → 每个 0.57 拍 = **265 ms**
+#
+# 创作者的原话是「特别喜欢发超短的声音」。所以下面按落差补了几个更缓的，
+# 而真正的把关在 `usable_cells()` —— 按**毫秒**过滤，不按拍。
 RHYTHM_CELLS = {
     "均分八分": (0.5,),
     "长短": (0.75, 0.25),
@@ -59,7 +74,41 @@ RHYTHM_CELLS = {
     "三连感": (1 / 3, 1 / 3, 1 / 3),
     "前紧后松": (0.25, 0.25, 0.5, 0.5),
     "附点": (0.75, 0.25, 0.5, 0.5),
+    # 2026-09-06 新增：落差更缓，快歌下也不会把字压碎
+    "缓长短": (0.6, 0.4),                       # 3:2
+    "缓切分": (0.4, 0.6, 0.5),
+    "波形": (0.5, 0.6, 0.5, 0.4),
+    "两长一短": (0.6, 0.6, 0.4),
+    "推进": (0.4, 0.5, 0.6, 0.7),               # 逐字变长
+    "回落": (0.7, 0.6, 0.5, 0.4),               # 逐字变短
 }
+
+# 一个汉字音节唱多短算「碎」。**这个数没有真歌数据支撑** ——
+# POP909 没有歌词，看不出一个音是一个字还是一个字里的拖腔，
+# 而真歌的短音大量是拖腔（我们是一字一音，每个短音都带辅音）。
+# 所以它来自创作者的直接反馈「特别喜欢发超短的声音」，
+# 参照的是辅音+元音能被听清的下限。**是判断不是测量，标在这里。**
+MIN_SYLLABLE_MS = 190.0
+
+
+def usable_cells(bpm: float, n_chars: int = 9, bpl_beats: float = 8.0,
+                 floor_ms: float = MIN_SYLLABLE_MS) -> list[str]:
+    """在这个速度下，哪些细胞不会把字压碎。
+
+    **按毫秒判，不按拍。** 同一个细胞在 66 BPM 是 227 ms（好好的），
+    到 129 BPM 就是 116 ms（机关枪）—— 细胞按拍定义，
+    而音节舒不舒服按毫秒。这个错配是「超短的声音」的根因。
+
+    复用 `_line_rhythm` 算实际时长，**不另写一套缩放逻辑** ——
+    两个实现算同一件事，迟早算出两个不同的数。
+    """
+    from .melodize import _line_rhythm
+    out = []
+    for name, cell in RHYTHM_CELLS.items():
+        durs = _line_rhythm(n_chars, cell, bpl_beats)
+        if min(durs) * 60000.0 / bpm >= floor_ms:
+            out.append(name)
+    return out
 
 CONTOUR_POOL = ("拱形", "下行", "上行", "波浪", "平缓")
 
@@ -200,7 +249,8 @@ def _register_for(key_root: int, rng: random.Random
 
 def expand(theme: str, *, seed: int = 0,
            avoid: list["SongSpec"] | None = None,
-           user_notes: tuple[str, ...] = ()) -> SongSpec:
+           user_notes: tuple[str, ...] = (),
+           bpm: float | None = None) -> SongSpec:
     """把一句主题补全成完整规格。
 
     `avoid` 给了既有作品的规格时，会**主动避开**它们的调与节奏细胞 ——
@@ -220,7 +270,13 @@ def expand(theme: str, *, seed: int = 0,
     keys = [k for k in KEYS if (k[0], k[1]) not in used_keys] or KEYS
     key_root, mode, key_name = rng.choice(keys)
 
-    cells = [c for c in RHYTHM_CELLS if c not in used_cells] or list(RHYTHM_CELLS)
+    # **速度先定，细胞后挑** —— 顺序反了就会重演那个错配：
+    # 细胞按 58–86 的慢速表挑，实际却在 129 BPM 上铺，于是把字压成 132 ms。
+    # 曲目真实的速度在 project.json 里（`bpm` 参数），规格自己那个只是兜底。
+    song_bpm = float(bpm) if bpm else float(
+        rng.choice([58, 62, 66, 70, 74, 80, 86]))
+    ok = usable_cells(song_bpm)
+    cells = [c for c in ok if c not in used_cells] or ok or list(RHYTHM_CELLS)
     rng.shuffle(cells)
     n_cells = rng.choice([2, 2, 3])
     chosen_cells = tuple(cells[:n_cells])
@@ -239,7 +295,7 @@ def expand(theme: str, *, seed: int = 0,
 
     return SongSpec(
         theme=theme,
-        bpm=float(rng.choice([58, 62, 66, 70, 74, 80, 86])),
+        bpm=song_bpm,
         key_root=key_root, mode=mode, key_name=key_name,
         register=_register_for(key_root, rng),
         contours=tuple(contours[:4]),
@@ -256,12 +312,19 @@ def expand(theme: str, *, seed: int = 0,
 
 
 def expand_many(theme: str, n: int, *, avoid: list[SongSpec] | None = None,
-                user_notes: tuple[str, ...] = ()) -> list[SongSpec]:
-    """出 n 份互不相同的规格，供创作者在**生成之前**剪枝。"""
+                user_notes: tuple[str, ...] = (),
+                bpm: float | None = None) -> list[SongSpec]:
+    """出 n 份互不相同的规格，供创作者在**生成之前**剪枝。
+
+    `bpm` **必须在这里传进来**，不能等规格出来之后再覆盖 ——
+    节奏细胞是按速度筛的（`usable_cells`），先挑细胞后改速度
+    等于按 66 BPM 的标准挑了细胞、拿到 129 BPM 上去铺。
+    实测那样会把汉字压成 132 ms，创作者的反馈是「特别喜欢发超短的声音」。
+    """
     out: list[SongSpec] = []
     acc = list(avoid or [])
     for i in range(n):
-        s = expand(theme, seed=i, avoid=acc, user_notes=user_notes)
+        s = expand(theme, seed=i, avoid=acc, user_notes=user_notes, bpm=bpm)
         out.append(s)
         acc.append(s)          # 后面的规格也避开前面刚生成的
     return out

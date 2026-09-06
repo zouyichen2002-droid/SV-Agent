@@ -520,8 +520,14 @@ def main() -> int:
         print(f"局部重生成　锁定现有调性 {kn0}")
 
     pool = []
-    for si, sp in enumerate(expand_many("晓风残月", a.specs)):
-        sp.bpm = a.bpm
+    # theme 用本曲的标题。原来写死「晓风残月」—— 它是随机种子的一部分，
+    # 等于所有歌共享同一个规格随机流；而且那是一首**测试产物**
+    # （创作者：不要任何之前做的歌进入经验和记忆）。
+    #
+    # bpm **必须在 expand 里就给**，不能等规格出来再覆盖：
+    # 节奏细胞按速度筛，先挑后改等于按慢速标准挑了细胞拿到快歌上铺。
+    theme = P.title or P.slug
+    for si, sp in enumerate(expand_many(theme, a.specs, bpm=a.bpm)):
         apply_register_shift(sp, shift)
         if lock_key:
             sp.key_root, sp.mode, sp.key_name = lock_key
