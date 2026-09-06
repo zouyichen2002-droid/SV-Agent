@@ -133,16 +133,20 @@ def intent_of(complaint: str) -> str | None:
 
 
 def _similar_evidence(proj):
-    """「太像上一首」需要参照曲。**没有参照就老实说没有。**"""
-    try:
-        import sys
-        sys.path.insert(0, str(MT.ROOT / "scripts"))
-        sys.path.insert(0, str(MT.ROOT / "out"))
-        import melody_v2 as prev
-        prev.build()
-        return True, "宇宙无边无垠"
-    except Exception:
-        return False, ""
+    """「太像上一首」需要参照曲。**没有参照就老实说没有。**
+
+    2026-09-06 拿掉了写死的《宇宙无边无垠》。创作者的原话：
+    「不要任何之前做的歌进入经验和记忆，那些都是用来测试接入能力的」。
+    拿一首测试产物当「不要像的对象」，等于把它当成了作品谱系里的一员。
+
+    所以现在**永远返回「没有参照」**，走到「问创作者」那条路上。
+    这不是退化 —— 一个诚实的「我没有可比的东西」，
+    比拿一首废弃的测试歌去比对有用得多。
+
+    将来要接回来的话，参照曲应当由创作者当场指定，
+    或者来自 `reference.py` 那批真歌，而不是硬编码在这里。
+    """
+    return False, ""
 
 
 def diagnose(proj: PJ.SongProject | None = None, complaint: str = "",

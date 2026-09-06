@@ -196,6 +196,39 @@ def load_pop909(song_dir) -> Ref:
 # 量：**复用我们自己那套**
 # =========================================================================
 
+def line_phrases(ref: Ref) -> list[Phrase]:
+    """把和弦段**合并到行**上，一行一个乐句。
+
+    ## 为什么必须有这一步
+
+    直接拿 `chord_midi.txt` 的和弦段当乐句是错的：实测 POP909 的和弦段
+    **中位只有 3 个音，16% 只有 1 个音**，而我们的乐句是一整行歌词（9 个音）。
+
+    单位差三倍，贴合度就没法比 —— 一个只有 1 个音的「乐句」，
+    那个音不是和弦音就是 0.0。第一版这么算出来「真歌 5% 的乐句贴合度为零」，
+    差点据此把阈值从 0.30 改掉。**那不是真歌跑调，是我的单位不对。**
+
+    合并规则：一行取**覆盖它时长最多**的那个和弦 —— 与我们「一行歌词
+    标一个和弦」的做法对齐。
+    """
+    out = []
+    for pi, (a, b) in enumerate(ref.lines):
+        weight: dict[tuple[int, str], float] = {}
+        for ph in ref.phrases:
+            lo, hi = max(a, ph.note_from), min(b, ph.note_to)
+            if hi <= lo or ph.chord_root is None:
+                continue
+            dur = sum(n.duration_beats for n in ref.notes[lo:hi])
+            k = (ph.chord_root, ph.chord_quality)
+            weight[k] = weight.get(k, 0.0) + dur
+        if not weight:
+            continue
+        (root, qual), _w = max(weight.items(), key=lambda kv: kv[1])
+        out.append(Phrase(index=pi, note_from=a, note_to=b,
+                          chord_root=root, chord_quality=qual))
+    return out
+
+
 def measure(ref: Ref) -> dict:
     """算与 `agent/metrics.py` 同名的指标。
 
@@ -207,7 +240,8 @@ def measure(ref: Ref) -> dict:
     ps = [n.midi for n in ref.notes]
     line_ranges = [max(p) - min(p) for p in
                    ([n.midi for n in ref.notes[a:b]] for a, b in ref.lines)]
-    ratios = chord_fit_ratios(ref.notes, ref.phrases)   # **同一个实现**
+    # **按行建乐句**，不用原始和弦段 —— 单位要和我们的「一行歌词」对齐
+    ratios = chord_fit_ratios(ref.notes, line_phrases(ref))  # **同一个实现**
     return {
         "id": ref.id, "key": ref.key, "bpm": ref.bpm,
         "n_notes": len(ref.notes), "n_accomp": ref.n_accomp,
