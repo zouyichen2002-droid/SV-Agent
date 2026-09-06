@@ -46,6 +46,18 @@ E_NOTES = 224           # 一个 pattern 的全部音符
 E_PLUGIN = 201          # 插件内部名，如 FLEX / FPC
 E_PRESET = 203          # 通道/音色名，如 Harmo Pad
 E_PLUGIN_DATA = 213     # 插件状态（不透明二进制）
+E_TEMPO = 223           # 速度点，12 字节
+
+# 速度点的结构（实测 test2.flp，该工程在 FL 里显示 66.000 BPM）：
+#
+#     00000000 | 05000040 | d0010100
+#     位置?      标记        0x000101d0 = 66000 = millibpm
+#
+# **证据强度要说清楚**：这是单个样本的推断。`Project_test1.flp` 里
+# 完全没有这个事件（那个工程没设过速度），与「223 是速度点」自洽，
+# 但不构成第二个正例。**写完必须由创作者在 FL 里看一眼 BPM 显示。**
+TEMPO_MARK = 0x40000005   # 偏移 4 的标记，用来确认没认错事件
+TEMPO_OFF = 8             # millibpm 在块里的偏移
 
 # **配器三件套。** 任何操作之后这三类必须逐字节不变，否则音源就丢了。
 ORCH = frozenset({E_PLUGIN, E_PRESET, E_PLUGIN_DATA})
@@ -237,6 +249,45 @@ def make_note(proto: bytes, *, pos: int, rack: int, length: int,
     return bytes(b)
 
 
+def tempo_of(doc: Doc) -> float | None:
+    """读速度。**没有速度点就返回 None**，不假装知道。"""
+    for eid, p in doc.events:
+        if eid == E_TEMPO and len(p) == 12 and \
+                struct.unpack_from("<I", p, 4)[0] == TEMPO_MARK:
+            return struct.unpack_from("<I", p, TEMPO_OFF)[0] / 1000.0
+    return None
+
+
+def set_tempo(doc: Doc, bpm: float) -> Doc:
+    """改速度。
+
+    三种情况分开处理，**都不静默**：
+
+    - 正好一个速度点 → 改它
+    - 一个都没有     → 报错。模板里没有速度点，就没有能改的地方；
+                       静默跳过的表现是「导出来的伴奏比人声慢一倍」
+    - 多于一个       → 拒绝。那是速度自动化，全改成同一个值
+                       等于把创作者画的速度曲线抹平
+    """
+    idx = [i for i, (eid, p) in enumerate(doc.events)
+           if eid == E_TEMPO and len(p) == 12
+           and struct.unpack_from("<I", p, 4)[0] == TEMPO_MARK]
+    if not idx:
+        raise FlpError(
+            f"{doc.path.name if doc.path else '这份工程'} 里没有速度点"
+            f"（事件 {E_TEMPO}）—— 改不了速度。"
+            f"请在 FL 里把模板的速度设一次再存，让这个事件出现")
+    if len(idx) > 1:
+        raise FlpError(f"有 {len(idx)} 个速度点 —— 这是速度自动化，"
+                       f"全改成同一个值会把曲线抹平。不动")
+    i = idx[0]
+    p = bytearray(doc.events[i][1])
+    struct.pack_into("<I", p, TEMPO_OFF, int(round(bpm * 1000)))
+    evs = list(doc.events)
+    evs[i] = (E_TEMPO, bytes(p))
+    return Doc(doc.head, evs, doc.path)
+
+
 def replace_notes(doc: Doc, blob: bytes) -> Doc:
     """换掉音符事件，**其余事件传同一个对象**（不复制、不重建）。"""
     return Doc(doc.head,
@@ -303,8 +354,8 @@ def midi_parts(path) -> tuple[list[tuple[str, list]], int]:
     return parts, mid.ticks_per_beat
 
 
-def splice_midi(template, midi, *, mapping: dict[int, int] | None = None
-                ) -> tuple[bytes, dict]:
+def splice_midi(template, midi, *, mapping: dict[int, int] | None = None,
+                bpm: float | None = None) -> tuple[bytes, dict]:
     """把伴奏 MIDI 的音符装进一份**已配好音源**的工程。
 
     `mapping` 是 {声部序号: 通道号}。不给就按顺序发牌 ——
@@ -341,9 +392,15 @@ def splice_midi(template, midi, *, mapping: dict[int, int] | None = None
     blob = b"".join(r[2] for r in recs)
 
     out = replace_notes(doc, blob)
+    # 速度：模板是上一首歌的，不改就会「伴奏比人声慢一半」——
+    # 而那种错在 FL 里打开完全不报错，要听到才知道
+    tempo_before = tempo_of(doc)
+    if bpm is not None:
+        out = set_tempo(out, bpm)
     assert_orch_intact(doc, out)
     return out.to_bytes(), {
         "template": str(template), "midi": str(midi),
+        "tempo_before": tempo_before, "tempo_after": tempo_of(out),
         "notes_before": n_notes(base), "notes_after": len(recs),
         "ppq": doc.ppq, "midi_tpb": tpb,
         "part_to_channel": used,

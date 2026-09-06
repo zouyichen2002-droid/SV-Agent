@@ -377,7 +377,9 @@ def _a_build_flp(proj, p) -> dict:
     if p.get("part_to_channel"):
         mapping = {int(k): int(v) for k, v in p["part_to_channel"].items()}
 
-    data, rep = FL.splice_midi(tmpl, proj.mid, mapping=mapping)
+    # 速度按本曲的 bpm 写进去 —— 模板往往来自上一首歌
+    data, rep = FL.splice_midi(tmpl, proj.mid, mapping=mapping,
+                               bpm=proj.bpm)
     g = SW.Guard(proj.agent_dir / "ledger.json")
     g.write(proj.acc_flp, data)
     rep["out"] = str(proj.acc_flp)

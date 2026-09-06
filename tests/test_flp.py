@@ -321,3 +321,53 @@ def test_flp钩子在文件不存在时是灰不是红(tmp_path, monkeypatch):
     monkeypatch.setattr(type(p), "acc_flp",
                         property(lambda self: tmp_path / "nope.flp"))
     assert TL.HOOKS["flp"](p).ok is None
+
+
+# =========================================================================
+# 速度：模板往往来自上一首歌
+# =========================================================================
+
+@needs_tmpl
+def test_读得出模板的速度():
+    """test2.flp 在 FL 里显示 66.000 BPM。"""
+    assert FL.tempo_of(FL.read(TEMPLATE)) == pytest.approx(66.0)
+
+
+@needs_tmpl
+def test_改速度只动那一个事件(tmp_path):
+    """**除速度点外逐字节不变。** 改速度顺手动了别的，
+    表现是「打开没报错但某处不对」—— 又一个安静的错误。"""
+    src = tmp_path / "s.flp"
+    src.write_bytes(TEMPLATE.read_bytes())
+    doc = FL.read(src)
+    out = FL.set_tempo(doc, 129.0)
+    assert FL.tempo_of(out) == pytest.approx(129.0)
+    diff = [i for i, (a, b) in enumerate(zip(doc.events, out.events)) if a != b]
+    assert len(diff) == 1, f"改速度动了 {len(diff)} 个事件"
+    assert out.events[diff[0]][0] == FL.E_TEMPO
+
+
+@needs_tmpl
+def test_改速度不碰配器(tmp_path):
+    src = tmp_path / "s.flp"
+    src.write_bytes(TEMPLATE.read_bytes())
+    doc = FL.read(src)
+    FL.assert_orch_intact(doc, FL.set_tempo(doc, 129.0))
+
+
+def test_没有速度点要报错而不是静默跳过():
+    """**静默跳过的表现是「伴奏比人声慢一倍」** —— 打开完全不报错。"""
+    head = struct.pack("<4sI", b"FLhd", 6) + struct.pack("<hHH", 0, 1, 96)
+    doc = FL.Doc(head, [(FL.E_NOTES, b"\x00" * FL.NOTE_SIZE)], None)
+    assert FL.tempo_of(doc) is None
+    with pytest.raises(FL.FlpError, match="没有速度点"):
+        FL.set_tempo(doc, 129.0)
+
+
+def test_多个速度点要拒绝而不是抹平():
+    """多个 = 速度自动化。全改成同一个值等于把创作者画的曲线抹掉。"""
+    head = struct.pack("<4sI", b"FLhd", 6) + struct.pack("<hHH", 0, 1, 96)
+    ev = struct.pack("<III", 0, FL.TEMPO_MARK, 66000)
+    doc = FL.Doc(head, [(FL.E_TEMPO, ev), (FL.E_TEMPO, ev)], None)
+    with pytest.raises(FL.FlpError, match="速度自动化"):
+        FL.set_tempo(doc, 129.0)

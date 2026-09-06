@@ -37,6 +37,7 @@ sys.path.insert(0, str(ROOT / "toolkit"))
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.stdout.reconfigure(encoding="utf-8")
 
+import make_accompaniment as MA
 import step3_melody as S3
 from make_accompaniment import (MIDI_NAME, TPB, build_parts, chord_label,
                                 density_of, write_midi)
@@ -52,16 +53,40 @@ BACKUP_DIR = S3.BACKUP_DIR
 class Song:
     """把「工程里的旋律 + 歌词里的进行」包成伴奏生成器认得的形状。"""
 
-    def __init__(self, sections, key_root, quality, bpm, n_bars, bpl=2):
+    # 默认律动：一套克制的组合。夜曲/离别题材不需要满编鼓。
+    DEFAULT_GROOVE = {
+        "pad": "sustain", "arp": "sparse", "bass": "1-3",
+        "drum": {"hat": "hat-4", "build": "kick-2",
+                 "full": "ballad", "none": "none"},
+    }
+
+    def __init__(self, sections, key_root, quality, bpm, n_bars, bpl=2,
+                 groove=None):
         self.SECTIONS = sections
         self.KEY_ROOT, self.KEY_QUALITY = key_root, quality
         self.BPM, self.N_BARS, self.BARS_PER_LINE = bpm, n_bars, bpl
-        # 律动。先用一套克制的组合：夜曲/离别题材不需要满编鼓
-        self.PAD_STYLE = "sustain"
-        self.ARP_FIGURE = "sparse"
-        self.BASS_GROOVE = "1-3"
-        self.DRUM_PICK = {"hat": "hat-4", "build": "kick-2",
-                          "full": "ballad", "none": "none"}
+        # 律动从 project.json 的 `groove` 读。**这是歌曲的属性，不是命令行参数**
+        # —— 同一首歌换台机器跑要得到同一份伴奏，写在命令行里做不到这一点。
+        g = {**self.DEFAULT_GROOVE, **(groove or {})}
+        self.PAD_STYLE = g["pad"]
+        self.ARP_FIGURE = g["arp"]
+        self.BASS_GROOVE = g["bass"]
+        self.DRUM_PICK = g["drum"]
+        # 名字写错就当场炸。静默回落到默认，表现是「配置写了但没生效」——
+        # 而那正是这个项目一路在防的那类：跑通了，结果却不是你要的。
+        for tbl, key, val in (("PAD_STYLES", "pad", self.PAD_STYLE),
+                              ("ARP_FIGURES", "arp", self.ARP_FIGURE),
+                              ("BASS_GROOVES", "bass", self.BASS_GROOVE)):
+            avail = getattr(MA, tbl)
+            if val not in avail:
+                raise SystemExit(
+                    f"project.json 的 groove.{key} = {val!r} 不认识。"
+                    f"可选：{sorted(avail)}")
+        for lvl, name in self.DRUM_PICK.items():
+            if name not in MA.DRUM_STYLES:
+                raise SystemExit(
+                    f"project.json 的 groove.drum.{lvl} = {name!r} 不认识。"
+                    f"可选：{sorted(MA.DRUM_STYLES)}")
 
 
 def main() -> int:
@@ -130,7 +155,9 @@ def main() -> int:
         for s, t, c, f in weak:
             print(f"    {s}「{t}」配 {c}，只有 {f*100:.0f}% 是和弦音")
 
-    song = Song(conv, kr, kq, a.bpm, S3.N_BARS)
+    # 律动从 project.json 读 —— 没写就用 DEFAULT_GROOVE
+    song = Song(conv, kr, kq, a.bpm, S3.N_BARS,
+                groove=(S3.P.raw or {}).get("groove"))
     parts, ch, sec = build_parts(song)
 
     print()
