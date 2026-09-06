@@ -164,12 +164,37 @@ def _register_for(key_root: int, rng: random.Random
     但**每首歌的具体落点要变**，否则「同音区」本身就是雍同来源：
     实测主歌 59–67 只有 6 个调内音，可区分的旋律本来就极少。
     """
-    lo_floor, hi_ceil = 59, 76           # 避开 57 和 78 两个边
+    # 2026-09-06 重写。旧版有一处**系统性**的窄化，不是随机波动：
+    #
+    #     verse_hi  = min(verse_lo + span, hi_ceil - 4)        ≤ 72
+    #     chorus_lo = choice([verse_hi-2, verse_hi-1, verse_hi])
+    #     chorus_hi = min(chorus_lo + choice([9,10,11]), 76)   ← 被 76 截断
+    #
+    # 意图是给副歌 9–11 个半音，但副歌起点贴着主歌顶端，再加 9–11
+    # 必然撞天花板，于是被截成 4–6。实测《月亮不靠岸》副歌音区
+    # **只有 3 个半音宽**，八句的句内极差全是 3。
+    #
+    # 拿 593 首真歌比出来的账（见 reference.py）：
+    #
+    #     每句极差中位   真歌 p10 5.0 / 中位 8.5     我们 3.0 —— 第 0.3 百分位
+    #
+    # 而同一首歌的**主歌**句极差中位是 9.0，与真歌持平 —— 生成器有能力，
+    # 是音区没给够。所以修的是音区，不是轮廓表。
+    #
+    # 新规则：**宽度优先于抬升。** 撞天花板就整体下移，绝不压缩宽度 ——
+    # 抬升少 2 个半音听得出「副歌没起来」，宽度少 6 个半音听起来是「念经」。
+    lo_floor, hi_ceil = 58, 77           # 星尘舒适区 57–78，两端各留 1
     verse_lo = rng.choice([lo_floor, lo_floor + 1, lo_floor + 2])
-    verse_span = rng.choice([9, 10, 11])          # 比原来的 8 宽
-    verse_hi = min(verse_lo + verse_span, hi_ceil - 4)
-    chorus_lo = rng.choice([verse_hi - 2, verse_hi - 1, verse_hi])
-    chorus_hi = min(chorus_lo + rng.choice([9, 10, 11]), hi_ceil)
+    verse_span = rng.choice([9, 10, 11])
+    verse_hi = verse_lo + verse_span
+
+    lift = rng.choice([5, 6, 7])                  # 副歌整体上抬多少
+    chorus_span = rng.choice([9, 10, 11])
+    chorus_lo = verse_lo + lift
+    chorus_hi = chorus_lo + chorus_span
+    if chorus_hi > hi_ceil:                       # 撞顶：下移，**不缩宽**
+        chorus_lo -= chorus_hi - hi_ceil
+        chorus_hi = hi_ceil
     return {"主歌": (verse_lo, verse_hi), "副歌": (chorus_lo, chorus_hi)}
 
 
