@@ -129,8 +129,47 @@ class Plan:
     bar0: int               # 起始小节
 
 
+def _tail_for(li: int, n_lines: int, fracs: tuple[float, ...]) -> float:
+    """这一句的末音该拿多少 —— **按段内位置，不是按循环轮换。**
+
+    第一版是 `fracs[li % len(fracs)]`。用两个值轮换，结果是
+    末音比例 3.0 / 4.3 / 3.0 / 4.3 …… **严格交替**，
+    等于把「句内长短交替」换成了「句间长短交替」。
+
+    创作者的原话是「一句里面喜欢长短交替」「一直是那几首歌的感觉」——
+    根子不在某个参数，在**循环**这个机制本身：细胞循环、末音循环、
+    轮廓循环。循环产生周期，耳朵把周期读作机械。
+
+    真歌不是循环，是**结构**：乐句往段落末尾收，末句拖长，中间的短。
+    所以这里按段内位置给：
+
+        段落最后一句   最长（收束）
+        段落中段       最短（往前赶）
+        其余           中间值
+
+    这样同一档参数在不同段落长度下也会给出不同的形状，
+    而不是一条重复到底的锯齿。
+
+    第二版又错了一次：写成「段末取 max、段中取 min、其余取 mid」，
+    而 `mid = sorted(fracs)[len//2]` 在只有两个元素时**等于 max**，
+    于是大部分句子拿到最大值 —— 实测 [6.5, 4.3, 6.5, 6.5]，
+    中位 6.5，**高过真歌 p75 的 5.3**。
+
+    第三版改成**在 lo 与 hi 之间按段内位置线性推进**：句子越靠近段末
+    收得越长。不从元组里挑，所以元组有几个元素都不影响形状。
+    """
+    if not fracs:
+        return 0.35
+    lo, hi = min(fracs), max(fracs)
+    if n_lines <= 1:
+        return hi
+    t = li / (n_lines - 1)              # 0（段首）→ 1（段末）
+    return lo + (hi - lo) * t
+
+
 def _line_rhythm(n_chars: int, cell: tuple[float, ...] = (0.5,),
-                 beats_per_line: float = 8.0) -> list[float]:
+                 beats_per_line: float = 8.0,
+                 tail_frac: float = 0.35) -> list[float]:
     """句内节奏：按**节奏细胞**铺走字部分，末字长音，句尾留 1 拍气口。
 
     `cell` 是这首歌的节奏细胞（如 `(0.75, 0.25)` 长短、`(0.25, 0.5, 0.25)` 切分），
@@ -146,7 +185,19 @@ def _line_rhythm(n_chars: int, cell: tuple[float, ...] = (0.5,),
     # 末字长音有上限。**不能把剩余时间全给末字** ——
     # 实测每句 4 小节时，末字拿到 11 拍 = 11.5 秒，创作者的反馈是
     # 「听起来都快唱断气了」。一个字唱 3 秒已经很长，4 拍是上限。
-    want_tail = min(MAX_TAIL_BEATS, max(0.75, body * 0.35))
+    #
+    # 2026-09-06：`tail_frac` 从写死的 0.35 变成参数。创作者的原话是
+    # 「每句最后一个字音特别长」「怎么一直是那几首歌的感觉」。
+    #
+    # 量出来的账（末音 ÷ 句内均值，300 首真歌 vs 我们三首）：
+    #
+    #     真歌   p25 1.60　中位 2.93　p75 5.34　p90 7.99   ← 跨度 5 倍
+    #     我们   4.31　4.31　4.31                          ← 三首完全一样
+    #
+    # **4.31 本身落在真歌范围内（约 p65），问题是它是个常数。**
+    # 每一句、每一首、从项目第一天起都是这个值 —— 那就是「同一种感觉」
+    # 的结构签名。真歌的末音长度按句、按段、按曲变，我们一动不动。
+    want_tail = min(MAX_TAIL_BEATS, max(0.75, body * tail_frac))
     head = [cell[i % len(cell)] for i in range(max(0, n_chars - 1))]
     head_budget = body - want_tail
     if head and head_budget > 0:
@@ -275,6 +326,7 @@ def melodize_spec(candidate, spec, cfg: CheckCfg, *, seed: int | None = None,
                     quality=spec.mode, register=spec.register, cfg=cfg,
                     seed=spec.seed if seed is None else seed,
                     contour_names=spec.contours,
+                    tail_fracs=getattr(spec, 'tail_fracs', (0.35,)),
                     rhythm_cells=tuple(RHYTHM_CELLS[c]
                                        for c in spec.rhythm_cells),
                     bars_per_line=spec.bars_per_line,
@@ -285,6 +337,7 @@ def melodize_spec(candidate, spec, cfg: CheckCfg, *, seed: int | None = None,
 def melodize(candidate, *, bpm: float, key_root: int, quality: str,
              register: dict[str, tuple[int, int]], cfg: CheckCfg,
              seed: int = 0, contour_names: tuple[str, ...] | None = None,
+             tail_fracs: tuple[float, ...] = (0.35,),
              rhythm_cells: tuple[tuple[float, ...], ...] | None = None,
              bars_per_line: int = 2,
              motif: tuple[int, ...] | None = None,
@@ -297,6 +350,7 @@ def melodize(candidate, *, bpm: float, key_root: int, quality: str,
     _name, _gist, secs = candidate
     rng = random.Random(seed)
     contour_names = contour_names or ("拱形", "下行", "上行", "波浪")
+    tail_fracs = tail_fracs or (0.35,)
     rhythm_cells = rhythm_cells or ((0.5,),)
     beats_per_line = bars_per_line * 4.0
 
@@ -341,7 +395,8 @@ def melodize(candidate, *, bpm: float, key_root: int, quality: str,
                                 motif=motif if li == 0 else None)
             durs = _line_rhythm(len(text),
                                 rhythm_cells[li % len(rhythm_cells)],
-                                bpl_beats)
+                                bpl_beats,
+                                _tail_for(li, len(lines), tail_fracs))
             t = plan.bar0 * 4.0
             first = idx
             syls = []

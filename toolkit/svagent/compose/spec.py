@@ -112,6 +112,26 @@ def usable_cells(bpm: float, n_chars: int = 9, bpl_beats: float = 8.0,
 
 CONTOUR_POOL = ("拱形", "下行", "上行", "波浪", "平缓")
 
+# 句末长音占句子时长的比例。**原来写死 0.35，是「同一种感觉」的结构签名。**
+#
+# 量出来（末音 ÷ 句内均值，300 首真歌 vs 本项目三首）：
+#
+#     真歌   p25 1.60　中位 2.93　p75 5.34　p90 7.99   跨度 5 倍
+#     我们   4.31　4.31　4.31                         三首完全一样
+#
+# 下面这些值换算成同一个比例是 1.3 / 2.2 / 3.2 / 4.3 / 6.0（9 字句），
+# 正好铺满真歌的 p20–p80。**按句轮换**，所以一首歌里也有长有短。
+# 只用 (最短, 最长) 两个端点 —— `_tail_for` 在段内线性推进，
+# 中间值由它算，不从这里挑。端点按真歌分布反推：
+# 比例 1.6 / 2.9 / 5.3 对应 9 字句的 frac 约 0.17 / 0.26 / 0.39。
+TAIL_FRACS = {
+    "平收":   (0.12, 0.18),      # 比例约 1.1 → 1.7，几乎不拖
+    "短收":   (0.15, 0.24),      #      1.4 → 2.5
+    "常规":   (0.20, 0.32),      #      1.9 → 3.8   ← 覆盖真歌中位
+    "推向段末": (0.14, 0.36),      #      1.3 → 4.5，段内落差最大
+    "长拖":   (0.28, 0.42),      #      3.1 → 5.8   ← 真歌 p75 附近
+}
+
 # ---------------------------------------------------------------- 伴奏律动
 #
 # 2026-08-23 创作者的诊断：**「不是旋律像，而是伴奏，就是那个 4/4 拍的伴奏
@@ -187,6 +207,8 @@ class SongSpec:
     arp_figure: str
     bass_groove: str
     drum_pick: dict          # 密度档 → 具体鼓型
+    tail_fracs: tuple[float, ...] = (0.35,)   # 句末长音占比，按句轮换
+    tail_name: str = "常规"                   # 上面那组的档名，供 avoid 用
     motif: tuple[int, ...] = ()        # 音程序列，可移调复用
     bars_per_line: int = 2
     seed: int = 0
@@ -281,6 +303,11 @@ def expand(theme: str, *, seed: int = 0,
     n_cells = rng.choice([2, 2, 3])
     chosen_cells = tuple(cells[:n_cells])
 
+    # 句末长音的形态也要按歌变 —— 写死一个值就是「同一种感觉」的来源
+    tail_name = rng.choice([t for t in TAIL_FRACS
+                            if t not in {s.tail_name for s in (avoid or [])
+                                         if hasattr(s, "tail_name")}]
+                           or list(TAIL_FRACS))
     contours = list(CONTOUR_POOL)
     rng.shuffle(contours)
     # 动机也要避开既有作品的 —— 这是 interval 相似度唯一的修法
@@ -300,6 +327,8 @@ def expand(theme: str, *, seed: int = 0,
         register=_register_for(key_root, rng),
         contours=tuple(contours[:4]),
         rhythm_cells=chosen_cells,
+        tail_fracs=TAIL_FRACS[tail_name],
+        tail_name=tail_name,
         pad_style=pad_style,
         arp_figure=arp_figure,
         bass_groove=bass_groove,
