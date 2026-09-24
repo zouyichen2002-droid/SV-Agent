@@ -204,12 +204,13 @@ def _script(name: str, args: list[str], proj) -> tuple[int, str]:
 
 def _changed_report(proj, before) -> dict:
     """改动高亮：拿动作前后的音符表现算，不解析脚本输出。"""
-    from ..compose.lyricfile import parse
+    from ..compose.lyricfile import first_version, parse
     from . import segments as SG
     try:
         _n, after = _lead_notes_of(proj.svp)
         vs, _probs = parse(proj.lyrics)
-        rep = SG.diff_sections(before, after, vs[next(iter(vs))], proj.form)
+        rep = SG.diff_sections(before, after,
+                               first_version(vs, proj.lyrics), proj.form)
     except Exception:
         return {}
     if not rep.sections:
@@ -219,10 +220,137 @@ def _changed_report(proj, before) -> dict:
             "span_delta_beats": rep.span_delta_beats}
 
 
+def _a_set_lyrics(proj, p) -> dict:
+    """把歌词写进 `lyrics.txt`。**写之前先过解析器，不过就拒。**
+
+    ## 为什么需要这个动作
+
+    `gen_lyrics` 只产出候选、不写文件（歌词由创作者拍板）。但这样一来
+    **整条链上没有任何东西能写词** —— 创作者说「选 A」，agent 只能干看着，
+    或者叫他自己去开记事本。2026-09-18 按「全程只聊天」跑的时候撞上了：
+    模型的回答是「手动创建文件夹」。
+
+    ## 为什么写之前一定要解析
+
+    写坏了不会立刻报错 —— 下一步 `gen_melody` 才崩，而且崩的地方看起来
+    像旋律的问题。**解析器是这个格式唯一的判据**，所以在这里就跑一遍，
+    不过就一个字节都不写。
+
+    ## 它不校对审美
+
+    字数、韵脚、倒字、口号句这些是创作者和模型的事。这里只管
+    「这个文件后面几步读得懂吗」。
+    """
+    from ..compose import lyricfile as LF
+    text = (p.get("text") or "").strip()
+    if not text:
+        raise ToolError("text 是空的")
+
+    # 先写到临时文件解析 —— **不碰真文件**。直接写再检查的话，
+    # 检查不过就得回滚，而回滚本身又是一次写。
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        probe = Path(td) / "lyrics.txt"
+        probe.write_text(text, encoding="utf-8-sig", newline="\r\n")
+        vs, probs = LF.parse(probe)
+    if probs:
+        nl = chr(10)
+        raise ToolError("歌词格式不过，没有写：" + nl + "  "
+                        + (nl + "  ").join(str(x) for x in probs[:6]))
+    ver = LF.first_version(vs)
+    nl = chr(10)
+
+    # ---- 三道硬闸。**都是「算了必须用」，不是「算了报出去」** ---------
+    #
+    # 第一版这里只算 `lines_match_form` 然后放进返回值，不拦。
+    # 2026-09-18 当场出事：模型传了一份**只有 `## A ｜标题` 一行、
+    # 零段落**的文本，解析器给「1 个版本 0 个问题」，闸放过去，
+    # **把上一轮写好的 20 句词冲掉了**。
+    #
+    # 「算出来了却不用」是这个项目反复栽的那类错 ——
+    # 数字摆在返回值里，看起来很负责，实际上什么都没挡住。
+
+    want = sum(b // 2 for sn, b in proj.form
+               if sn not in LF.WORDLESS)
+    if ver.n_lines == 0:
+        raise ToolError(
+            f"这一版（{ver.key}｜{ver.title}）**一句歌词都没有**，没有写。"
+            + nl + "只有 `## X ｜标题` 那一行是不够的：段名要单独一行，"
+            "段名下面每句缩进写「和弦<空格>歌词」。")
+    if ver.n_lines != want:
+        raise ToolError(
+            f"句数不对：这一版 {ver.n_lines} 句，曲式要 {want} 句，没有写。"
+            + nl + "曲式：" + " · ".join(f"{sn}{b}小节" for sn, b in proj.form)
+            + nl + "有词段落每 2 小节一句，所以："
+            + " + ".join(f"{sn}{b // 2}句" for sn, b in proj.form
+                         if sn not in LF.WORDLESS)
+            + nl + "现在是：" + " + ".join(f"{sn}{len(ls)}句"
+                                        for sn, ls in ver.sections))
+    bad = [(sn, t, len(t)) for sn, ls in ver.sections for t, _c in ls
+           if not 6 <= len(t) <= 12]
+    if bad:
+        raise ToolError(
+            f"有 {len(bad)} 句字数离谱（要 6–12 字），没有写："
+            + nl + nl.join(f"  {sn}｜{t}（{n} 字）" for sn, t, n in bad[:6])
+            + nl + "字数不齐会让每句的时长忽长忽短 —— "
+            "生成器多半一个可用候选都出不来。")
+
+    before = (proj.lyrics.read_text(encoding="utf-8-sig")
+              if proj.lyrics.exists() else "")
+    g = SW.Guard(proj.agent_dir / "ledger.json")
+    g.write(proj.lyrics, text.encode("utf-8-sig"))
+    return {"versions": sorted(vs), "title": ver.title,
+            "n_lines": ver.n_lines, "n_chars": ver.n_chars,
+            "lines_expected_by_form": want,
+            "sections": [f"{sn}×{len(ls)}" for sn, ls in ver.sections],
+            "chars_per_line": [len(t) for _sn, ls in ver.sections
+                               for t, _c in ls],
+            "progression": " / ".join("-".join(c for _t, c in ls)
+                                      for _sn, ls in ver.sections),
+            "was_placeholder": "歌词待写" in before,
+            "out": str(proj.lyrics)}
+
+
+def _a_new_song(proj, p) -> dict:
+    """开一首新歌。→ 新歌的 slug 与路径。
+
+    ## 这个动作跟池子里别的都不一样
+
+    `Runner(proj)` 把每个动作都绑在**当前这首歌**上。这一个不动当前的歌，
+    它在旁边**新建一首**。所以：
+
+    - `changed_files` 是空的（当前歌确实一个字节没动）
+    - 会话树节点记在当前歌上，回退它**不会删掉新歌**
+    - 调用方拿到 `slug` 之后要**自己切过去**，否则后面几步还在改旧歌
+
+    本来更干净的做法是放在「工作区」那一层，而池子里只放「对本歌的操作」。
+    但创作者的要求是「全程只聊天」，而聊天只能碰到动作池 ——
+    所以这条不对称是**知情选择**，不是疏忽。
+    """
+    title = (p.get("title") or "").strip()
+    try:
+        np = PJ.new_song(title, theme=p.get("theme") or "",
+                         bpm=p.get("bpm"), slug=p.get("slug") or None)
+    except Exception as e:
+        raise ToolError(f"{e}")
+    return {"slug": np.slug, "title": np.title, "bpm": np.bpm,
+            "n_bars": np.n_bars,
+            "svp": str(np.svp), "svp_built": np.svp.exists(),
+            "flp_template": str(np.flp) if np.flp else None,
+            "lyrics": str(np.lyrics),
+            "next": f"歌词还是占位的。下一步：gen_lyrics 出候选 → "
+                    f"set_lyrics 写进去。**注意当前会话还指着 "
+                    f"{proj.slug}，要改 {np.slug} 得先切过去。**"}
+
+
 def _a_gen_melody(proj, p) -> dict:
+    # 新歌第一次跑，`.svp` 还不存在 —— 这是**最正常的情况**，不是错误。
+    # 第一版这里只 `except ToolError`，而 `read_back` 抛的是
+    # `FileNotFoundError`，于是创作者点一下只看到一句 `[Errno 2]`。
+    made = PJ.ensure_svp(proj)
     try:
         _n, before = _lead_notes_of(proj.svp)
-    except ToolError:
+    except (ToolError, FileNotFoundError):
         before = []
     args = ["--write", "--closed"]
     scope = p.get("scope")
@@ -234,7 +362,10 @@ def _a_gen_melody(proj, p) -> dict:
     if p.get("bpm") is not None:
         args += ["--bpm", str(p["bpm"])]
     _rc, out = _script("step3_melody", args, proj)
-    return {"stdout_tail": out[-800:], **_changed_report(proj, before)}
+    rep = {"stdout_tail": out[-800:], **_changed_report(proj, before)}
+    if made:
+        rep["made_svp"] = made        # **建了文件就报出来**，不静默
+    return rep
 
 
 def _a_gen_harmony(proj, p) -> dict:
@@ -362,12 +493,18 @@ def _a_build_flp(proj, p) -> dict:
     两者刻意分开：覆盖他的工程等于把配器与编排冲掉。
     """
     from .. import flp as FL
+    # 新歌的 project.json 里没有 flp 字段 —— 这是**必经状态**，不是错误。
+    # 模板是共用的（「挂一次，不是每首歌一次」），从已有歌里推出来接上。
+    made = PJ.ensure_flp(proj)
     tmpl = Path(p["template"]) if p.get("template") else proj.flp
     if not tmpl:
         raise ToolError(
-            "这首歌的 project.json 里没有 flp 字段，也没给 template。"
-            "**需要一份已经挂好音源的 FL 工程当模板** —— "
-            "音源块只能从装过它的工程里搬，凭空造不出来")
+            "这首歌的 project.json 里没有 flp 字段，也没给 template，"
+            "而且从已有歌里也推不出一份可用的模板。"
+            "**需要一份已经挂好音源的 FL 工程** —— "
+            "音源块只能从装过那个插件的工程里搬，凭空造不出来。"
+            "在 FL 里挂一次音源存成工程，把路径写进任意一首歌的 "
+            "project.json 的 flp，以后每首新歌自动跟上")
     if not tmpl.exists():
         raise ToolError(f"模板不存在：{tmpl}")
     if not proj.mid.exists():
@@ -383,6 +520,8 @@ def _a_build_flp(proj, p) -> dict:
     g = SW.Guard(proj.agent_dir / "ledger.json")
     g.write(proj.acc_flp, data)
     rep["out"] = str(proj.acc_flp)
+    if made:
+        rep["linked_flp"] = made      # **接了模板就报出来**，不静默
     return rep
 
 
@@ -425,7 +564,7 @@ def _a_pick(proj, p) -> dict:
     这是相对 coding agent 的一处优势：代码没有天然的段落边界，歌有。
     """
     import tempfile
-    from ..compose.lyricfile import parse
+    from ..compose.lyricfile import first_version, parse
     from . import segments as SG
 
     t = TR.Tree(proj)
@@ -443,7 +582,7 @@ def _a_pick(proj, p) -> dict:
     lead_name, cur_notes = _lead_notes_of(proj.svp)
 
     vs, _probs = parse(proj.lyrics)
-    ver = vs[next(iter(vs))]
+    ver = first_version(vs, proj.lyrics)
     scope = list(p["sections"])
     merged, rep = SG.splice(cur_notes, src_notes, scope, ver, proj.form)
     if not SG.unchanged_outside(cur_notes, merged, scope, ver):
@@ -579,6 +718,28 @@ ACTIONS: list[Action] = [
            "唯一真正需要语言能力的动作。**只产出候选，不写文件** —— "
            "歌词由创作者拍板"),
 
+    Action("set_lyrics", "把歌词写进 lyrics.txt（写前先过解析器，不过就拒）",
+           _obj({"text": {"type": "string",
+                          "description": "整份歌词文件的内容，"
+                                         "格式照 songs/banjia/lyrics.txt"}},
+                ("text",)),
+           _a_set_lyrics, ("state",), True, READY,
+           "`gen_lyrics` 只出候选不写文件，所以原来**整条链上没有东西能写词**。"
+           "选中哪一版，把那一版的正文传进来", "step2_lyrics"),
+
+    Action("new_song", "开一首新歌：建目录、配置、空 .svp、接上 FL 模板",
+           _obj({"title": {"type": "string", "description": "歌名（中文就行）"},
+                 "theme": {"type": "string", "description": "一句话主题，"
+                                                            "越具体越好写"},
+                 "bpm": {"type": "number", "minimum": 40, "maximum": 200,
+                         "description": "留空 = 按真歌分布取一个"},
+                 "slug": {"type": "string",
+                          "description": "目录名，留空 = 标题转拼音"}},
+                ("title",)),
+           _a_new_song, (), True, READY,
+           "**池子里唯一不改当前这首歌的动作。** 建完要自己切过去，"
+           "否则后面几步还在改旧歌"),
+
     Action("gen_melody", "重新生成主旋律与和声（整首）",
            _obj({"scope": {
                      "type": "array", "items": {"type": "string"},
@@ -613,7 +774,7 @@ ACTIONS: list[Action] = [
            "只暴露了音区偏移。调 / 节奏细胞 / 动机在 SongSpec 里有，"
            "但 step3 还没开出对应开关", script="step3_melody"),
 
-    Action("gen_accompaniment", "生成伴奏 MIDI（之后要人在 FL 里配器导出）",
+    Action("gen_accompaniment", "生成伴奏 MIDI（下一步 build_flp 会自动挂音源）",
            _obj({}), _a_gen_accompaniment, ("state",), True, script="step4_accompaniment"),
 
     Action("assemble", "把 FL 导出的伴奏音频挂进工程",
@@ -695,13 +856,19 @@ ACTIONS: list[Action] = [
 BY_NAME = {a.name: a for a in ACTIONS}
 
 
-def to_mistral_tools() -> list[dict]:
+def to_mistral_tools(writes: bool = True) -> list[dict]:
     """给模型的 tools 数组。**只导出 ready 与 partial** ——
-    没接上的动作放进去只会换来一次必然失败的调用。"""
+    没接上的动作放进去只会换来一次必然失败的调用。
+
+    `writes=False` 时只导出不写文件的动作。**但这只是「提示」不是「闸」** ——
+    模型完全可以喊一个不在表里的名字。真正的闸在 `loop.run` 的执行那一行。
+    两处都要有：表少了它不会想去调，闸拦住它调了也没用。
+    """
     return [{"type": "function",
              "function": {"name": a.name, "description": a.desc,
                           "parameters": a.schema}}
-            for a in ACTIONS if a.status != NEEDS_MODEL]
+            for a in ACTIONS
+            if a.status != NEEDS_MODEL and (writes or not a.writes)]
 
 
 # =========================================================================

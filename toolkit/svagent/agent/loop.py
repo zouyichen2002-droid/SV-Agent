@@ -126,15 +126,35 @@ def context(s: SS.Session, ask: str) -> list[dict]:
     ]
 
 
+def _writes(name: str) -> bool:
+    """这个动作会不会写文件。**名字不认识就当会写** ——
+    不认识的东西按危险处理，反过来会让打错一个字就绕过闸。"""
+    a = TL.BY_NAME.get(name)
+    return True if a is None else a.writes
+
+
 def run(s: SS.Session, ask: str, *, client: LM.Mistral | None = None,
         auto_rounds: int = 1, max_actions: int = 8,
-        budget: BD.Budget | None = None) -> LoopResult:
-    """跑一轮。→ `LoopResult`。**不抛异常** —— 退出原因都写在结果里。"""
+        budget: BD.Budget | None = None,
+        allow_writes: bool = True) -> LoopResult:
+    """跑一轮。→ `LoopResult`。**不抛异常** —— 退出原因都写在结果里。
+
+    `allow_writes=False`：模型只能调不写文件的动作。要改工程，它得**说出来**，
+    由创作者自己去点。给「聊天框」这种随手一句就触发的入口用 ——
+    那里没有「点确认」这一步，不设闸等于把确认闸绕过去了。
+
+    闸设了**两道**，因为它们挡的不是同一件事：
+
+    - 工具表少导出（`tools_for_model(writes=False)`）—— 让它**不想**去调
+    - 执行前再查一次（下面 `_BLOCKED`）—— 它**真调了**也没用
+
+    只做第一道是不够的：工具表是提示，模型可以喊表外的名字。
+    """
     client = client or LM.Mistral()
     bud = budget or s.budget
     res = LoopResult(usage=client.usage)
     msgs = context(s, ask)
-    tools = s.tools_for_model()
+    tools = s.tools_for_model(writes=allow_writes)
     n = 0
 
     while True:
@@ -177,6 +197,19 @@ def run(s: SS.Session, ask: str, *, client: LM.Mistral | None = None,
             except ValueError:
                 params = {}
             step = Step(n, "tool", action=name, params=params)
+
+            # ---- 第二道闸：**执行前**查，不是靠工具表拦 ----------------
+            if not allow_writes and _writes(name):
+                step.error = (f"「{name}」会写文件，本轮不允许。"
+                              "要改工程请创作者自己点。")
+                step.result = {"ok": False, "error": step.error,
+                               "blocked": True}
+                res.steps.append(step)
+                msgs.append({"role": "tool", "tool_call_id": c.get("id", ""),
+                             "name": name,
+                             "content": json.dumps(step.result,
+                                                   ensure_ascii=False)})
+                continue
 
             # ---- ④⑤ 执行 + 钩子（都在 Session.act 里）-----------------
             try:

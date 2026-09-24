@@ -90,15 +90,43 @@ class Metric:
         return f"{v}{self.unit}{t}"
 
 
+class NoLead(RuntimeError):
+    """工程里还没有主旋律轨。**这是新歌的必经状态，不是错误。**"""
+
+
 def _lead(proj: PJ.SongProject):
-    """读回主旋律与段落结构。**用 step3 那一个实现，不重写。**"""
+    """读回主旋律与段落结构。**用 step3 那一个实现，不重写。**
+
+    ## 为什么要把异常类型换掉
+
+    `S3.read_lead` 是给命令行用的，没有主旋律时 `raise SystemExit` ——
+    那在脚本里是对的（退出码）。但它在库里被调用时，`SystemExit` 继承的是
+    **`BaseException` 不是 `Exception`**，于是下面每一个 `except Exception`
+    都接不住它。
+
+    后果：`set_lyrics` 之后、`gen_melody` 之前（每首歌的必经状态），
+    `metrics.collect` 抛 `SystemExit` 一路穿到 HTTP 处理线程，
+    线程死掉、**连响应都不发**。创作者看到的是「✗ Failed to fetch」，
+    零解释。2026-09-18 按「全程只聊天」跑《海边的雨》时撞上的。
+
+    下面那些 `except Exception` 全都是**写了却结构性打不响**的防护 ——
+    作者本来就打算接住这种情况。所以在这里归一化，
+    让那些防护开始真的生效，而不是逐个改成 `except BaseException`
+    （那会顺手吞掉 Ctrl-C）。
+    """
     sys.path.insert(0, str(ROOT / "scripts"))
     import step3_melody as S3
 
-    from ..compose.lyricfile import parse
-    vs, _probs = parse(proj.lyrics)
-    ver = vs[next(iter(vs))]
-    return S3.read_lead(proj.svp, ver, proj.form), ver
+    from ..compose import lyricfile as LF
+    vs, _probs = LF.parse(proj.lyrics)
+    try:
+        ver = LF.first_version(vs, proj.lyrics)
+    except LF.LyricsEmpty as e:
+        raise NoLead(str(e)) from e
+    try:
+        return S3.read_lead(proj.svp, ver, proj.form), ver
+    except S3.NoLead as e:
+        raise NoLead(str(e)) from e
 
 
 # =========================================================================

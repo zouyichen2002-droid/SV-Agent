@@ -42,7 +42,7 @@ import step3_melody as S3
 from make_accompaniment import (MIDI_NAME, TPB, build_parts, chord_label,
                                 density_of, write_midi)
 from svagent.compose.checks import note_name
-from svagent.compose.lyricfile import parse
+from svagent.compose.lyricfile import first_version, parse
 from svagent.compose.melodize import chord_of
 
 # 一个项目一份伴奏 MIDI，固定名字
@@ -101,7 +101,7 @@ def main() -> int:
         for x in probs:
             print("  ", x)
         return 1
-    ver = vs[next(iter(vs))]
+    ver = first_version(vs, S3.LYRICS)
     lead_name, notes, sections = S3.read_lead(S3.PROJECT, ver, S3.FORM)
     kr, kq, kname = S3.infer_key([n.midi for n in notes])
     ps = [n.midi for n in notes]

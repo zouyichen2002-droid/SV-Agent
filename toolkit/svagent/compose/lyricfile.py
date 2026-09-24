@@ -50,6 +50,10 @@ _GIST = re.compile(r"^主旨[：:]\s*(.*)$")
 _LINE = re.compile(r"^\s+(" + "|".join(CHORDS) + r")\s+(\S.*)$")
 
 
+class LyricsEmpty(RuntimeError):
+    """歌词文件里一段都没有。**新歌的必经状态，不是 bug。**"""
+
+
 @dataclass
 class Problem:
     lineno: int
@@ -145,6 +149,22 @@ def parse(path: Path | str) -> tuple[dict[str, Version], list[Problem]]:
             problems.append(Problem(i, stripped, why))
         else:
             problems.append(Problem(i, stripped, "无法识别（段名？请检查拼写）"))
+
+    # **一个版本都没解析出来，本身就是个问题。**
+    #
+    # 刚建好的新歌，`lyrics.txt` 里只有 `# 标题` 和「（歌词待写）」——
+    # 没有任何一行触发上面那些判定，所以第一版这里返回
+    # `({}, [])`：既没有版本，也没有问题。
+    #
+    # 然后 `step3_melody.py` 里 `vs[next(iter(vs))]` 抛 `StopIteration`，
+    # 创作者点一下只看到一句裸异常。**「词还没写」是新歌的必经状态，
+    # 不是解析器该崩的地方。**
+    if not versions:
+        problems.append(Problem(
+            0, Path(path).name,
+            "整个文件里没有一段歌词。格式是：一行 `## A ｜歌名` 起一个版本，"
+            "下面 `主歌1` 这样的段名单独一行，段名下每句缩进写「和弦<空格>歌词」"
+            "（照 songs/banjia/lyrics.txt 抄最快）"))
 
     return versions, problems
 
@@ -248,3 +268,23 @@ def skeleton_text(form, **kw) -> str:
         for chord, n in ls:
             lines.append(f"  {chord}  （{n} 字）")
     return "\n".join(lines)
+
+
+def first_version(versions: dict, path=None):
+    """取第一个版本。**空的时候报人话，不抛 `StopIteration`。**
+
+    原来六个地方各写一遍 `vs[next(iter(vs))]`。歌词还是占位的时候
+    （新歌的必经状态），`next()` 抛 `StopIteration` —— 一个**没有消息**的
+    异常，创作者看到的就是一行 `StopIteration:` 后面什么都没有。
+
+    2026-09-18 撞到两次：一次是 step3 崩在这里，一次是桌面程序的
+    「八项检查」那一栏显示 `StopIteration:`。
+    """
+    if not versions:
+        where = f"（{path}）" if path else ""
+        raise LyricsEmpty(
+            f"歌词里还没有任何一段{where}。"
+            "格式是：一行 `## A ｜歌名` 起一个版本，下面 `主歌1` 这样的段名"
+            "单独一行，段名下每句缩进写「和弦<空格>歌词」"
+            "（照 songs/banjia/lyrics.txt 抄最快）")
+    return versions[next(iter(versions))]

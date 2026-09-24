@@ -290,3 +290,78 @@ def distribution(rows: list[dict], keys=("contour_overall", "contour_line",
                   "p25": q(.25), "median": q(.50), "p75": q(.75),
                   "p90": q(.90), "max": vals[-1]}
     return out
+
+
+# =========================================================================
+# 缓存好的调查结果
+#
+# `survey()` 跑一遍 909 首要几分钟。结果落在 `out/pop909_survey.json`，
+# 之后所有「跟真歌比一比」的地方都读它。
+#
+# **读取口只留这一个。** 第一版 `webapp.py` 自己又读了一遍、自己又筛了一遍，
+# 那就是第二个实现 —— 两边算同一件事，迟早算出两个不同的数
+# **而且两边都不报错**。这项目为此栽过好几次。
+# =========================================================================
+
+SURVEY_JSON = Path(__file__).resolve().parents[2] / "out" / "pop909_survey.json"
+
+
+def load_survey(path: Path | None = None) -> list[dict]:
+    """读缓存的调查结果。**读不到就返回空，不抛异常也不编数。**"""
+    import json
+    p = path or SURVEY_JSON
+    if not p.exists():
+        return []
+    try:
+        rows = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return rows if isinstance(rows, list) else []
+
+
+def sane_rows(rows: list[dict]) -> list[dict]:
+    """滤掉切句明显不对的歌。
+
+    POP909 只能按休止切句，遇上长连奏或密集装饰就会切出「一句 2 个音」
+    或者「一句 40 个音」。拿这种句子去定阈值，定出来的是切句算法的性质，
+    不是歌的性质。所以要求：**至少 10 句，且句长中位在 5–20 之间**。
+    """
+    return [r for r in rows
+            if r.get("n_lines", 0) >= 10
+            and r.get("line_len_median")
+            and 5 <= r["line_len_median"] <= 20]
+
+
+def values_of(rows: list[dict], key: str) -> list[float]:
+    """某个指标的全部取值，排好序。"""
+    return sorted(r[key] for r in rows if r.get(key) is not None)
+
+
+def percentile_in(values: list[float], v: float | None) -> float | None:
+    """`v` 排在 `values` 的第几百分位。
+
+    **没有值或没有语料一律返回 `None`，不是 0。**
+    0 的意思是「垫底」，`None` 的意思是「没依据」—— 三色纪律的灰档。
+    """
+    if v is None or not values:
+        return None
+    return sum(1 for x in values if x < v) / len(values) * 100.0
+
+
+def pick_bpm(rng=None, rows: list[dict] | None = None) -> float:
+    """给新歌挑一个速度：**在真歌的四分位距里取**。
+
+    为什么不写死一个默认值 —— 每首新歌都同一个速度，是「怎么一直是
+    那几首歌的感觉」的来源之一。为什么不全域随机 —— 真歌 p10 到 p90
+    是 60 到 116，两头都有，但极端值更可能是标注问题而不是审美选择。
+
+    语料不在就退回 **74**（909 首的中位，2026-09-18 实测），
+    并且**这个数字的出处写在这里**，不是凭感觉定的。
+    """
+    import random
+    r = rng or random.Random()
+    bpms = values_of(rows if rows is not None else load_survey(), "bpm")
+    if len(bpms) < 20:
+        return 74.0
+    lo, hi = bpms[len(bpms) // 4], bpms[len(bpms) * 3 // 4]
+    return float(round(r.uniform(lo, hi)))

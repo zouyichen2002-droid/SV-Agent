@@ -95,15 +95,19 @@ class Session:
     def actions(self) -> list[TL.Action]:
         return TL.ACTIONS
 
-    def tools_for_model(self) -> list[dict]:
-        """第 10 项要的 tools 数组。**前端不自己拼 schema。**"""
-        return TL.to_mistral_tools()
+    def tools_for_model(self, writes: bool = True) -> list[dict]:
+        """第 10 项要的 tools 数组。**前端不自己拼 schema。**
+
+        `writes=False` 给「只让它看、不让它动手」的前端用。
+        """
+        return TL.to_mistral_tools(writes=writes)
 
     def act(self, name: str, params: dict | None = None) -> TL.ToolResult:
         return TL.Runner(self.proj, budget=self.budget).run(name, params)
 
     def ask(self, text: str, *, auto_rounds: int = 1,
-            max_actions: int = 8, client=None):
+            max_actions: int = 8, client=None,
+            allow_writes: bool = True):
         """**模型驱动的一轮。** 第 10 项的入口，也是最后一个前端。
 
         它和别的方法一样只是 Session 的一个方法 —— 这正是第 9 项
@@ -111,7 +115,8 @@ class Session:
         """
         from .agent import loop as LP
         return LP.run(self, text, client=client, auto_rounds=auto_rounds,
-                      max_actions=max_actions, budget=self.budget)
+                      max_actions=max_actions, budget=self.budget,
+                      allow_writes=allow_writes)
 
     def llm_usage(self) -> dict:
         """模型用量。**读报告** —— 观察不发请求。"""

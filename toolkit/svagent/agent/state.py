@@ -35,7 +35,7 @@ from pathlib import Path
 
 from .. import project as PJ
 from ..compose.checks import CheckCfg, run_all
-from ..compose.lyricfile import lint, parse
+from ..compose.lyricfile import first_version, lint, parse
 from ..compose.melodize import chord_of
 
 # 谁来做这一步
@@ -226,7 +226,18 @@ def inspect(proj: PJ.SongProject | None = None) -> ProjectState:
             except Exception as e:
                 s4.blockers.append(f"读不了 {proj.wav.name}：{e}")
         else:
-            s4.blockers.append(f"等你在 FL 里配器并导出到 {proj.wav}")
+            # **配器已经不用他做了**（ADR-0013，直写 .flp）。这句话原来写
+            # 「等你在 FL 里配器并导出」—— 那是 build_flp 之前的分工，
+            # 留着会让他以为还得自己挂音源、自己编排。
+            # 按 acc_flp 在不在，分成两句话说。
+            if proj.acc_flp.exists():
+                s4.blockers.append(
+                    f"打开 {proj.acc_flp.name} 导出到 {proj.wav.name}"
+                    "（音源已挂好，**不用配器**，按导出就行）")
+            else:
+                s4.blockers.append(
+                    f"先跑 build_flp 生成 {proj.acc_flp.name}，"
+                    f"再打开它导出到 {proj.wav.name}")
             s4.who = BY_CREATOR
     steps.append(s4)
 
@@ -296,7 +307,9 @@ def check_melody(proj: PJ.SongProject | None = None) -> list:
     sys.path.insert(0, str(PJ.ROOT / "scripts"))
     import step3_melody as S3
     vs, _ = parse(proj.lyrics)
-    ver = vs[next(iter(vs))]
+    # **不用裸的 next(iter(vs))** —— 歌词还是占位的时候它抛
+    # `StopIteration`，一个没有消息的异常，界面上只显示 `StopIteration:`
+    ver = first_version(vs, proj.lyrics)
     _name, notes, sections = S3.read_lead(proj.svp, ver, proj.form)
     kr, kq, _kn = S3.infer_key([n.midi for n in notes])
     from ..compose.melodize import phrases_of

@@ -202,3 +202,186 @@ if __name__ == "__main__":
             print("  " + load(dd.name).describe().replace("\n", "\n  "))
     print(f"\n当前（SVAGENT_SONG={os.environ.get('SVAGENT_SONG') or '未设置'}）：")
     print("  " + current().describe().replace("\n", "\n  "))
+
+
+# =========================================================================
+# 开一首新歌
+#
+# 为什么不做成动作池里的一个动作 —— `Runner(self.proj)` 把每个动作都绑在
+# **一首已存在的歌**上。「新建」不属于任何一首歌，硬塞进去是把非本歌的
+# 操作塞进本歌的框里，回滚、钩子、幂等报告全都对不上。
+# =========================================================================
+
+def slugify(title: str) -> str:
+    """中文标题 → ASCII 目录名。
+
+    走拼音（`pypinyin`，事实：本机 0.55.0）。装不上就退回一串十六进制 ——
+    **退回来的名字难看，但不会静默生成一个和别人重名的目录**。
+    """
+    try:
+        from pypinyin import lazy_pinyin
+        s = "".join(lazy_pinyin(title))
+    except Exception:
+        import hashlib
+        s = "song" + hashlib.sha1(title.encode("utf-8")).hexdigest()[:6]
+    s = "".join(c for c in s.lower() if c.isalnum())
+    return s[:24] or "song"
+
+
+def new_song(title: str, *, theme: str = "", bpm: float | None = None,
+             slug: str | None = None, form: list | None = None,
+             svp: str | Path | None = None, rng=None) -> SongProject:
+    """开一首新歌。→ 建好的 `SongProject`。
+
+    **撞名直接拒绝，不追加序号。** 悄悄建成 `haifeng2` 的话，
+    之后 `SVAGENT_SONG=haifeng` 会跑到旧的那首上，而且哪儿都不报错。
+
+    `bpm` 留空就按真歌分布取一个（`reference.pick_bpm`）——
+    **不写死一个默认值**：每首新歌同一个速度，是「怎么一直是那几首歌的
+    感觉」的来源之一。
+
+    `.svp` 这里不建，第 ③ 步 `step3_melody` 会从模板整份写出来
+    （`Builder.save(force=True)`）。创作者**不需要**先去 SynthV 建工程。
+    """
+    from . import reference as RF
+
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("歌名不能是空的")
+    slug = (slug or slugify(title)).strip()
+    if not slug.isascii() or not slug.replace("_", "").isalnum():
+        raise ValueError(f"目录名 {slug!r} 只能是 ASCII 字母数字和下划线")
+
+    d = SONGS / slug
+    if (d / "project.json").exists():
+        raise FileExistsError(
+            f"已经有一首叫 {slug!r} 的歌了（{load(slug).title}）。"
+            "换个名字，或者直接改那一首。")
+
+    if bpm is None:
+        bpm = RF.pick_bpm(rng)
+    bpm = float(bpm)
+    if not 40.0 <= bpm <= 200.0:
+        raise ValueError(f"BPM {bpm} 不在 40–200 之间")
+
+    svp = Path(svp) if svp else (d / f"{title}.svp")
+    scaffold(slug, title, str(svp), bpm=bpm, form=form, notes=theme)
+    p = load(slug)
+    # **一出生就是完整的。** 少这一步的话，第一次点 gen_melody 会崩在
+    # 「读旧工程」那行，报一句 `[Errno 2]` —— 而这是新歌的必经之路。
+    ensure_svp(p)
+    # FL 那边同理：没有 flp 字段，第 ④ 步 build_flp 会停在
+    # 「需要一份已经挂好音源的工程当模板」。模板是共用的，接上就行。
+    ensure_flp(p)
+    return load(slug)
+
+
+def ensure_svp(proj: "SongProject") -> str | None:
+    """`.svp` 不在就从模板拷一份空工程出来。→ 干了什么，或者 `None`（本来就有）。
+
+    ## 为什么需要这个
+
+    `scaffold()` 的文档说「svp 由创作者在 SynthV 里建」。**那句话过期了** ——
+    现在第 ③ 步会从模板整份写出来。但中间有个坑：`_a_gen_melody` 在调 step3
+    **之前**先读一遍旧工程（为了报「改了哪几个音」），文件不在就
+    `FileNotFoundError`，而它只 `except ToolError`。
+
+    结果是「新歌第一次做旋律」这个最正常的情况直接崩，
+    报错还是个裸异常，创作者只能看到一句 `[Errno 2]`。
+
+    ## 为什么是拷模板，不是新写一个
+
+    `.svp` 是 SynthV 的工程格式，版本敏感。模板
+    （`songs/_template/empty_v196.svp`，1 轨 0 音符）是**从真 SynthV 里存出来的**，
+    照抄一定能打开；自己拼一个 JSON 只能赌它认。
+
+    ## 它不覆盖
+
+    已经有文件就一个字节都不碰，直接返回 `None`。
+    创作者可能正开着 SynthV 编辑它 —— 这条是硬的。
+    """
+    import shutil
+    if proj.svp.exists():
+        return None
+    if not TEMPLATE.exists():
+        raise FileNotFoundError(
+            f"模板不在：{TEMPLATE}。它是从真 SynthV 存出来的空工程，"
+            "丢了得重新存一份，不能自己拼。")
+    proj.svp.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(TEMPLATE, proj.svp)
+    return (f"从模板建了空工程 {proj.svp.name}"
+            f"（{TEMPLATE.name}，{proj.svp.stat().st_size} B，1 轨 0 音符）")
+
+
+def default_flp() -> Path | None:
+    """已有歌里用得最多、且真实存在的那份 FL 模板。→ 没有就 `None`。
+
+    ## 为什么是「从已有歌里推」而不是写死一个路径
+
+    那份模板是创作者自己挂的（本机在 `E:\潮声回响\test2\test2.flp`，
+    5 条通道：Harmo Pad / Acoustic Bass / Crystal / Choir Aahs / FPC）。
+    把它写进库里，等于把**一台机器的目录布局**钉进代码 ——
+    他换个位置就得改代码，而他不写代码。
+
+    从「已经在用的值」里推，换位置只要改一首歌的 `project.json`，
+    后面的新歌自动跟上。
+
+    ## 为什么按「用得最多」选
+
+    `追逐梦想` 指着另一份 `Project_test1.flp`（早期的）。按出现次数选，
+    自然收敛到当前在用的那份，而不是看 `songs/` 的字母序碰上谁。
+    """
+    from collections import Counter
+    votes: Counter[str] = Counter()
+    for d in sorted(SONGS.iterdir()):
+        if not d.is_dir() or d.name.startswith("_"):
+            continue
+        cfg = d / "project.json"
+        if not cfg.exists():
+            continue
+        try:
+            v = json.loads(cfg.read_text(encoding="utf-8")).get("flp")
+        except Exception:
+            continue
+        if v and Path(v).exists():
+            votes[str(v)] += 1
+    return Path(votes.most_common(1)[0][0]) if votes else None
+
+
+def ensure_flp(proj: "SongProject") -> str | None:
+    """`flp` 字段是空的就填上共用模板。→ 干了什么，或者 `None`。
+
+    ## 这里「建」的是什么，说清楚免得误会
+
+    `proj.flp` 是**素材来源**：一份已经挂好音源的 FL 工程。
+    `proj.acc_flp`（`<歌名>_伴奏.flp`）才是**产物**，由 `build_flp` 拼出来。
+
+    音源块只能从装过那个插件的工程里搬，**凭空造不出来** ——
+    所以这里不是「生成一个空 flp」，是「把新歌接到那份挂好音源的模板上」。
+    真正凭空建的是 `.svp`（见 [ensure_svp]），因为 SynthV 的空工程能照抄模板。
+
+    ## 它不改已经填了的
+
+    创作者可能故意给某首歌换了模板。填过就不动。
+    """
+    if proj.flp:
+        return None
+    tmpl = default_flp()
+    if tmpl is None:
+        return None                      # 没有可推的 —— 交给 build_flp 去报
+    cfg = config_path(proj.slug)
+    d = json.loads(cfg.read_text(encoding="utf-8"))
+    d["flp"] = str(tmpl)
+    cfg.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    proj.flp = tmpl
+    return f"FL 模板接到 {tmpl}（{len(_flp_channels(tmpl))} 条通道已挂音源）"
+
+
+def _flp_channels(p: Path) -> list:
+    """模板里有哪几条通道。只为报告用，读不了就算了。"""
+    try:
+        from . import flp as FL
+        return FL.instruments(FL.Doc(*FL.parse(p.read_bytes())))
+    except Exception:
+        return []

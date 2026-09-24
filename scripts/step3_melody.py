@@ -56,7 +56,7 @@ from svagent import svp_build as SB
 from svagent.compose.checks import (MAJOR, MINOR, NAMES, CheckCfg, Note,
                                     check_range, note_name)
 from svagent.compose.harmonize import HarmonyPlan, harmonize
-from svagent.compose.lyricfile import parse
+from svagent.compose.lyricfile import first_version, parse
 from svagent.compose.melodize import melodize_spec, phrases_of
 from svagent.compose.repair import Ctx, cost, repair
 from svagent.compose.spec import expand_many, motif_name
@@ -172,6 +172,28 @@ def using(proj):
     return _cm()
 
 
+class NoLead(RuntimeError):
+    """工程里还没有主旋律轨，或者音符与歌词不同源。
+
+    ## 为什么不是 `SystemExit`
+
+    原来这里 `raise SystemExit` —— 在命令行里是对的（退出码），
+    但 `read_lead` 有 9 个调用点，其中两个在库里
+    （`agent/state.check_melody`、`agent/metrics._lead`）。
+
+    `SystemExit` 继承的是 **`BaseException` 不是 `Exception`**，
+    所以调用方写的 `except Exception` 一个都接不住 ——
+    那些防护是**写了却结构性打不响**的。
+
+    2026-09-18 的表现：一首刚写完词、还没生成旋律的新歌
+    （**每首歌的必经状态**），打开桌面程序整个页面 HTTP 000 ——
+    处理线程被 `SystemExit` 打死，连响应都不发，
+    创作者只看到「✗ Failed to fetch」，零解释。
+
+    改成普通异常，那 9 个调用点的 `except Exception` 就都开始真的生效。
+    """
+
+
 def read_lead(project: Path, ver, form):
     """从工程里读回主旋律，并重建 melodize 那种 SECTIONS 形状。
 
@@ -181,7 +203,8 @@ def read_lead(project: Path, ver, form):
     back = SB.read_back(project)
     lead_name = next((k for k in back if k.startswith("主旋律")), None)
     if lead_name is None:
-        raise SystemExit(f"{project} 里没有「主旋律」轨，无法只改和声")
+        raise NoLead(f"{project} 里没有「主旋律」轨 —— "
+                     "新歌还没跑过 gen_melody，这是必经状态")
     raw = sorted(back[lead_name], key=lambda n: n["onset"])
     Q = SB.QUARTER_BLICKS
     notes = [Note(i, n["onset"] / Q, n["duration"] / Q, int(n["pitch"]),
@@ -208,7 +231,7 @@ def sections_from(notes, ver, form):
             syls = []
             for ch in text:
                 if idx >= len(notes):
-                    raise SystemExit(
+                    raise NoLead(
                         f"音符只有 {len(notes)} 个，"
                         f"歌词需要 {ver.n_chars} 个 —— 两者不同源")
                 n = notes[idx]
@@ -485,7 +508,9 @@ def main() -> int:
         for x in probs:
             print("  ", x)
         return 1
-    ver = vs[next(iter(vs))]
+    # 上面的 `probs` 已经把「一段都没有」拦住了，但**这一行是最初崩的那行**
+    # （`StopIteration`，一个没有消息的异常）。走统一入口，别留第二条路。
+    ver = first_version(vs, LYRICS)
     base = [(name, list(lines)) for name, lines in ver.sections]
     dur = N_BARS * 4 * 60.0 / a.bpm
     print(f"歌词　{ver.key}｜{ver.title}　{ver.n_lines} 句 / {ver.n_chars} 字")
@@ -552,16 +577,36 @@ def main() -> int:
         print("✗ 没有可用候选")
         return 2
 
-    refs = []
-    try:
-        import melody_v2 as prev
-        pn, pp, _ = prev.build()
-        refs.append(Fingerprint.of("宇宙无边无垠", pn, pp))
-    except Exception:
-        pass
-    best = (max(usable, key=lambda c: min(1.0 - max(c.fp.similarity(r).values())
-                                          for r in refs))
-            if refs else usable[0])
+    # ---- 挑一个：**只在和弦跟歌词一致的候选里挑** ---------------------
+    #
+    # `vary_progression` 是为了把候选池撑开。但变过的进行**下游看不到**：
+    # `state.check_melody` 和 `step4_accompaniment` 都从歌词那一列读和弦
+    # （`agent/state.py` 的 `read_lead(..., ver, ...)` 与 `step4:105`）。
+    #
+    # 拿一个「变过进行」的候选写进工程，就变成**旋律按一套和弦写、
+    # 伴奏按另一套弹**。它对自己那份进行是 0 finding，所以这里不报，
+    # 等创作者点下一步才由八项检查抓出来 —— 而那时候看起来像旋律有毛病。
+    # 2026-09-18《我爱你》就是这么卡住的：7 个 finding 全是这个来的。
+    #
+    # 歌词那一列是和弦的**真相来源**（创作者写的，随时可改）。
+    # 所以：一致的优先；一个都没有才退回去，而且**大声说出来**。
+    # 用 `Cand.prog` 比，不自己再拼一套 —— 它就是上面「建议进行」那一行的写法
+    base_prog = " / ".join("-".join(c for _, c in ls) for _, ls in base)
+    same = [c for c in usable if c.prog == base_prog]
+    if same:
+        best = same[0]
+    else:
+        best = usable[0]
+        print("⚠ 没有一个候选的和弦跟歌词那一列一致，只能用变过进行的那版。")
+        print("  **下游的八项检查和伴奏都按歌词列走**，所以它会报 finding，")
+        print("  而且旋律和伴奏会真的对不上。改歌词里的和弦列，或者接受 finding。")
+    print(f"和弦与歌词一致的候选 {len(same)}/{len(usable)} 个"
+          f"　挑了 {'一致的' if same else '★不一致的★'}")
+    # 原来这里按「跟《宇宙无边无垠》最不像」挑。那是本项目自己的早期测试产物，
+    # 创作者明确说过「不要任何之前做的歌进入经验和记忆」。而且它早就是死代码 ——
+    # `melody_v2` 在 `out/` 下，不在 sys.path 上，import 一直失败，
+    # 于是实际行为是 `usable[0]`：**取第一个，根本没在挑**。
+    # 「加大候选数反而变差」就是这么来的：只是换了「第一个」是谁。
 
     lead_notes, lead_sections = best.notes, best.SECTIONS
     lead_name = f"主旋律_{best.spec.key_name}"
@@ -621,10 +666,13 @@ def main() -> int:
           f" 副歌{best.spec.register['副歌']}")
     print(f"  最长音 {mx:.2f} 拍 = {mx * 60 / a.bpm:.2f}s"
           f"　同轨重叠 {overlaps(best.notes)}（SynthV 不允许非 0）")
-    if refs:
-        print("  与既有作品的相似度：")
-        print(report(best.notes, best.phrases, refs))
-
+    # 原来这里打印「与既有作品的相似度」，比的是 `melody_v2`（《宇宙无边无垠》）。
+    # 那是本项目早期的测试产物，创作者明确说过不要它进经验。
+    # 而且它一直 import 失败（文件在 `out/` 下，不在 sys.path 上），
+    # 所以这段从来没打印过。
+    #
+    # **留个缺口在这里**：跨歌重复度现在没有任何在跑的检查。
+    # 要补的话，参照物应当是真歌（POP909），不是我们自己的作品。
     return write_project(a, lead_name, lead_notes,
                          lead_sections, key_root, quality,
                          cfg, phrases=best.phrases)
