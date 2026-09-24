@@ -10,7 +10,7 @@ PRD §15：M0 的产物是**验证记录、能力矩阵、V1 清单**；
 | 序 | §14 的哪一行 | 状态 | 记录 |
 |---|---|---|---|
 | **1** | 钢琴预览速度 | **绿** · gm.dls 定为预览音源（你 09-24 确认） | [01-piano-preview.md](01-piano-preview.md) |
-| 2 | Python 与音频依赖 | 灰 · 3.11 已在本机（见下），还没建环境跑样本 | —— |
+| **2** | Python 与音频依赖 | **绿**（V1）· Python 3.13 + numpy 2.5.3；V2 的 CUDA torch 灰（强证据）、basic-pitch 红（原样） | [02-python-env.md](02-python-env.md) |
 | 3 | FL 工程读写、tempo、渲染入口 | 未开始 | —— |
 | 4 | SynthV 工程、脚本或桥接能力 | 未开始 | —— |
 | 5 | 文件并发编辑 | 未开始 | —— |
@@ -26,12 +26,12 @@ PRD §15：M0 的产物是**验证记录、能力矩阵、V1 清单**；
 | 项 | 值 | 和哪一项有关 |
 |---|---|---|
 | CPU / 内存 | AMD Ryzen 9 9955HX3D 16 核 · 31.2 GB | 全部 |
-| 显卡 | NVIDIA GeForce RTX 5070 Ti Laptop GPU · 12 GB 显存（另有 AMD 核显） | V2 源分离、音高模型 |
+| 显卡 | NVIDIA GeForce RTX 5070 Ti Laptop GPU · 12 GB 显存 · 算力 12.0（sm_120，Blackwell）· 驱动 591.97，支持 CUDA 13.1（另有 AMD 核显） | V2 源分离、音高模型 |
 | 系统 | Windows 11 家庭中文版 10.0.26200 | 全部 |
 | 默认 `python` | 3.13.9 · `G:\miniconda` · 装有 numpy 2.3.4 / scipy 1.16.3 / librosa 1.0.0 / soundfile 0.14.0 / mido | M0-01 用的就是它 |
-| **torch** | 2.13.0 **+cpu** —— 是 CPU 版，**用不上那块显卡** | V2 要换 CUDA 版 |
-| 其他 Python | `py` 启动器里还有：3.13（python.org）· **3.11**（python.org）· **3.11.16 / 3.11.13**（uv 管理） | 第 2 项：上游 pi-audio 要求 ≤ 3.11 |
-| uv · conda | 都在 `G:\miniconda\Scripts\` | 第 2 项 |
+| **torch** | miniconda 里是 2.13.0 **+cpu**，用不上那块显卡。**同机 ComfyUI 自带的 Python 3.13.14 里是 2.13.0+cu130，在 sm_120 上实测可用** | 第 2 项 · V2 |
+| 其他 Python | python.org 的 **3.13.7**（worker 环境的底座，自带 21 个包，含 numpy 2.2.6、scipy 1.16.2）· python.org 的 3.11.6 · uv 管理的 3.11.16 / 3.11.13 | 第 2 项 |
+| uv · conda | 都在 `G:\miniconda\Scripts\`；uv 0.12.5。**uv 默认挑 miniconda 当底座，建环境必须显式指定**；缓存在 C 盘、项目在 E 盘，不能硬链接（只是慢一点） | 第 2 项 |
 | Node | v24.19.0 · npm 11.17.0。`pnpm` 不在 PATH 上（但 `E:\.pnpm-store` 存在） | M1 起的 TS 主进程 |
 | ffmpeg | 9.0 完整版（winget 装的） | 发布包转码 |
 | FluidSynth / SoundFont | **都没有** | 第 1 项因此改走 gm.dls |

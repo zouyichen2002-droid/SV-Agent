@@ -1,0 +1,14 @@
+# M0-02 探针：音频 worker 的独立 Python 环境（PRD §14「Python 与音频依赖」）。
+# V1 的 worker 只需要 numpy —— M0-01 证明 gm.dls 钢琴预览只靠 numpy 和标准库。
+# V2 要的重依赖（CUDA 版 torch 等）不在这里装，到 V2 选定方法时再加、再验。
+
+[project]
+name = "svagent-m0-02-worker-env"
+version = "0.0.0"
+requires-python = "==3.13.*"
+dependencies = [
+    "numpy==2.5.3",
+]
+
+[tool.uv]
+package = false
