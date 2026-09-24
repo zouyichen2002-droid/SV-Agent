@@ -11,13 +11,13 @@ PRD §15：M0 的产物是**验证记录、能力矩阵、V1 清单**；
 |---|---|---|---|
 | **1** | 钢琴预览速度 | **绿** · gm.dls 定为预览音源（你 09-24 确认） | [01-piano-preview.md](01-piano-preview.md) |
 | **2** | Python 与音频依赖 | **绿**（V1）· Python 3.13 + numpy 2.5.3；V2 的 CUDA torch 灰（强证据）、basic-pitch 红（原样） | [02-python-env.md](02-python-env.md) |
-| 3 | FL 工程读写、tempo、渲染入口 | 未开始 | —— |
+| **3** | FL 工程读写、tempo、渲染入口 | **绿** · 命令行导出可用；速度在事件 156（BPM × 1000）；写音符进 `.flp` 仍是灰 | [03-fl-project.md](03-fl-project.md) |
 | 4 | SynthV 工程、脚本或桥接能力 | 未开始 | —— |
 | 5 | 文件并发编辑 | 未开始 | —— |
 | 6 | 所谓 512 音符限制 | 未开始 | —— |
 | 7 | 首批平台发布入口 | 未开始 · **要你本人账号操作** | —— |
 
-**退出条件的前一半（预览有可行路径）已满足。** 后一半等 3–6 项。
+**退出条件的前一半（预览有可行路径）已满足。** 后一半（工程风险有替代方案）：FL 已有，还差 4–6 项。
 
 **灰 ≠ 绿**（PRD §8.3）：灰是「还没有可判断的依据」，不是「差不多没问题」。
 
@@ -33,6 +33,7 @@ PRD §15：M0 的产物是**验证记录、能力矩阵、V1 清单**；
 | 其他 Python | python.org 的 **3.13.7**（worker 环境的底座，自带 21 个包，含 numpy 2.2.6、scipy 1.16.2）· python.org 的 3.11.6 · uv 管理的 3.11.16 / 3.11.13 | 第 2 项 |
 | uv · conda | 都在 `G:\miniconda\Scripts\`；uv 0.12.5。**uv 默认挑 miniconda 当底座，建环境必须显式指定**；缓存在 C 盘、项目在 E 盘，不能硬链接（只是慢一点） | 第 2 项 |
 | Node | v24.19.0 · npm 11.17.0。`pnpm` 不在 PATH 上（但 `E:\.pnpm-store` 存在） | M1 起的 TS 主进程 |
+| **FL Studio** | **2025 · 25.2.5.5319** · `G:\FL Studio\FL64.exe`（不在默认的 Program Files 下）· 自带 34 个模板、161 个 `.flp` · 本机离线手册只是个壳 | 第 3 项 |
 | ffmpeg | 9.0 完整版（winget 装的） | 发布包转码 |
 | FluidSynth / SoundFont | **都没有** | 第 1 项因此改走 gm.dls |
 | gm.dls | `C:\Windows\System32\drivers\gm.dls` · 3,440,660 字节 · SHA-256 `3229B09B9D7D9F3F4793B0D9B34FE6ABC75CFA4A2503C0C90F43FF651BA7F2C0` | 第 1 项 |
