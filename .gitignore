@@ -1,5 +1,5 @@
 # ---- 第三方版权素材：绝不提交 ----
-# 参考音频、视频、分离出的 stem
+# 音频、视频、分离出的 stem
 *.wav
 *.mp3
 *.m4a
@@ -9,26 +9,26 @@
 *.mp4
 *.mkv
 *.mov
-audio/
-stems/
-separated/
 
-# 歌词文件（版权内容）
+# 带时间轴的歌词（翻唱时是第三方版权内容）
 *.lrc
 *.srt
 *.ass
 *.vtt
-lyrics/
 
-# SynthV 工程文件（含第三方乐谱数据）
+# 工程与乐谱：SynthV / FL Studio / MIDI 都可能带第三方乐谱
 *.svp
 *.svpk
-# 唯一例外：**零音符的空工程模板**。它不含任何乐谱内容，
-# 但携带创作者本机 SynthV 版本的完整字段结构（version 196），
-# 是直写 .svp 的结构来源（ADR-0009）。缺了它 agent 就得重新反推 schema。
-!songs/_template/empty_*.svp
+*.flp
+*.mid
+*.midi
 
-# ---- 模型权重：体积 + 第三方，靠 scripts/ 重建 ----
+# 音色库（如 Windows 自带的 gm.dls）：只在本机读取，绝不复制进仓库
+*.dls
+*.sf2
+*.sf3
+
+# ---- 模型权重 ----
 models/
 *.bin
 *.safetensors
@@ -36,13 +36,12 @@ models/
 *.pth
 *.onnx
 *.ckpt
-*.dnni
 
-# ---- 本地路径配置：因机而异 ----
-config.local.*
+# ---- 凭据与本机配置 ----
 .env
 .env.*
 !.env.example
+config.local.*
 
 # ---- 中间产物 ----
 out/
@@ -50,8 +49,6 @@ output/
 cache/
 *.npz
 *.npy
-eval/reports/*
-!eval/reports/.gitkeep
 
 # ---- Python ----
 __pycache__/
@@ -74,44 +71,4 @@ dist/
 .DS_Store
 Thumbs.db
 .claude/
-
-# ---- 生成物 ----
-# 仪表盘每次动作后重新生成，是文件的视图而不是真相来源（ADR-0012）。
-# 要归档某一刻的界面，它会进 checkpoint 的 blobs/，不进 git。
-songs/*/dashboard*.html
-
-# ---- 例外：结构模板 ----
-# 空 SynthV 工程，零音符、无任何第三方数据，但是工作流的必需依赖
-# （每首新歌靠它当 .svp 的结构模板，见 toolkit/svagent/svp_build.py）
-!songs/_template/*.svp
-
-# 手工备份
 *.bak
-
-# agent 的账本与 checkpoint（出处记录，不是真相来源）
-songs/*/.agent/
-
-# 幂等测试的沙盒（跑完自动删）
-songs/_idem*/
-
-# 测试结果报告（是「上次测的结果」，不是真相来源）
-.agent/
-
-# 会话树测试的沙盒
-songs/_tree*/
-
-# 复验与幂等报告（记的是「上次跑的结果」，不是真相来源）
-.agent/
-
-# 工具层测试的沙盒
-songs/_tools*/
-
-# 段落测试的沙盒
-songs/_seg*/
-
-# 指标测试的沙盒
-songs/_metrics*/
-
-# 诊断与并行假设的沙盒
-songs/_diag*/
-songs/_trial_*/
