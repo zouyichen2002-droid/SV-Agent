@@ -24,6 +24,9 @@ user and is NOT distributed in this repository:
 
 1. Synthesizer V Studio, its voice databases and acoustic models (Dreamtonics)
 2. FL Studio and its bundled instruments (Image-Line)
+3. Microsoft GS Wavetable Synth sound set (gm.dls, shipped with Windows).
+   Read in place from C:\Windows\System32\drivers for draft piano
+   previews only. Never copied into this repository.
 
 The v1 codebase and its third-party notices are preserved at tag
 `v1-archive`.
