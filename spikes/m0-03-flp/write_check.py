@@ -14,13 +14,16 @@ FL 读出来的必须不是 66 BPM，检查必须报红。
 from __future__ import annotations
 
 import os
+import sys
 import wave
 
 import flp
 import fl_cli
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BASE = os.path.join(HERE, "out", "samples", "tpl_Empty_Empty.flp")
+# 底稿：默认是 FL 自带的空模板（旧版本存的）；也可以传一个 FL 2025 存的文件进来
+BASE = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(HERE, "out", "samples", "tpl_Empty_Empty.flp")
+PREFIX = os.path.splitext(os.path.basename(BASE))[0]
 WORK = os.path.join(HERE, "out", "write")
 TEMPO_ID = 156
 
@@ -59,10 +62,11 @@ def main():
     os.makedirs(WORK, exist_ok=True)
     base = flp.read(BASE)
     orig = [e.value for e in base.events if e.id == TEMPO_ID]
-    print(f"底：{os.path.basename(BASE)} · 事件 {TEMPO_ID} = {orig} → {orig[0] / 1000:g} BPM\n")
+    print(f"底：{os.path.basename(BASE)}（FL 构建 {base.build}）· 结构 {'对' if base.structure_ok else '错'}"
+          f" · 事件 {TEMPO_ID} = {orig} → {orig[0] / 1000:g} BPM\n")
 
     print("── 先证明检查会响（注入缺陷：忘了乘 1000）──")
-    bad = write_tempo(base, 66, "bug_forgot_x1000.flp")
+    bad = write_tempo(base, 66, f"{PREFIX}_bug_forgot_x1000.flp")
     ok, line = judge(bad, 66, with_wav=False)
     print(f"  想写 66 BPM，实际写入值 66 → {line}")
     print(f"  → {'检查失灵 ✗（它竟然判对了）' if ok else '检查会响 ✓（判为不对）'}\n")
@@ -72,7 +76,7 @@ def main():
     print("── 真写入 ──")
     all_ok = True
     for bpm in (66, 97.5):
-        path = write_tempo(base, round(bpm * 1000), f"empty_{str(bpm).replace('.', '_')}bpm.flp")
+        path = write_tempo(base, round(bpm * 1000), f"{PREFIX}_{str(bpm).replace('.', '_')}bpm.flp")
         ok, line = judge(path, bpm, with_wav=True)
         all_ok &= ok
         print(f"  写 {bpm:g} BPM → {line}")
