@@ -7,6 +7,9 @@
   只打印它的 SHA-256 前 12 位，和凭据扫描器登记的哈希对一下。
 - 第一个请求是列模型（不收费）；第二个用最便宜的模型、max_tokens=1，
   只为看限额相关的响应头。09-27 那次一共花了 5 个 token。
+- 第三、四个是**选定的生成模型** Medium 3.5（`mistral-medium-2604`）：
+  模型详情（不收费，看别名、上下文、能力）+ 一次 max_tokens=1 的真调用（09-27 花了 17 个 token）。
+  别名那一行是「为什么钉死日期版本、不用 -latest」的证据。
 """
 from __future__ import annotations
 
@@ -21,6 +24,8 @@ import urllib.request
 ENV = pathlib.Path(__file__).resolve().parents[2] / ".env"
 # 凭据扫描器登记的那把 key 的 SHA-256（哈希不泄露 key 本身）
 KNOWN = "f8b904657a66f13da91b5f6f4596b3244702fccb5d7c025121f1856cc11e5096"
+# 选定的生成模型（创作者 09-27 定）。钉死日期版本：-latest 这类别名会漂移
+GEN_MODEL = "mistral-medium-2604"
 
 
 def read_env_key() -> str:
@@ -80,6 +85,25 @@ def main() -> None:
     print("限额相关的响应头:")
     for k, v in sorted(limit_headers(headers).items()):
         print("  ", k, "=", v)
+
+    status, _headers, body, dt = call("GET", f"https://api.mistral.ai/v1/models/{GEN_MODEL}", key)
+    print(f"\n[详情 · {GEN_MODEL}] HTTP {status} · {dt:.2f} 秒")
+    if status == 200:
+        print("   别名:", body.get("aliases"))
+        print("   上下文:", body.get("max_context_length"), "· 退役:", body.get("deprecation"))
+        caps = body.get("capabilities") or {}
+        print("   能力:", {k: v for k, v in caps.items() if v})
+    else:
+        print(body)
+
+    status, _headers, body, dt = call("POST", "https://api.mistral.ai/v1/chat/completions", key, {
+        "model": GEN_MODEL,
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1,
+    })
+    print(f"\n[1 token 请求 · {GEN_MODEL}] HTTP {status} · {dt:.2f} 秒")
+    print("   返回的型号:", body.get("model") if status == 200 else "——",
+          "| 用量:", body.get("usage") if status == 200 else body)
 
 
 if __name__ == "__main__":
