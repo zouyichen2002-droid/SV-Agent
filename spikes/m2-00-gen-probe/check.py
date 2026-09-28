@@ -134,8 +134,10 @@ def _bar_rhythm(b) -> tuple:
 
 
 def is_332(b) -> bool:
-    onsets = {st for st, _, _, _ in b["melody"]}
-    return {0, 1.5, 3} <= onsets
+    """这一小节的起音**只有** 0、1.5、3 三处（拖腔「-」不算新起音）。
+    09-28 更正：第一版写的是「包含这三处」，一整小节平均的八分音符也满足 —— 被当成三三二，数虚高了。"""
+    onsets = {st for st, _, _, ly in b["melody"] if ly != "-"}
+    return onsets == {0, 1.5, 3}
 
 
 def syncopations(c) -> int:
@@ -237,7 +239,8 @@ def selftest() -> list[str]:
     if not m["歌词和音符对得上"]:
         fails.append("合法样本的歌词被判成对不上")
     c332 = _inject(lambda c: c["bars"][0].__setitem__("melody", [[0, 1.5, 64, "啊"], [1.5, 1.5, 65, "啊"], [3, 1, 67, "啊"]]))
-    if not is_332(c332["bars"][0]) or is_332(_base()["bars"][0]):
+    eighths = {"melody": [[i * 0.5, 0.5, 64, "啊"] for i in range(8)]}   # 一整小节平均八分音符：不是三三二
+    if not is_332(c332["bars"][0]) or is_332(_base()["bars"][0]) or is_332(eighths):
         fails.append("三三二识别不对")
     if syncopations(c332) < 1 or syncopations(_base()) != 0:
         fails.append(f"切分识别不对：注入后 {syncopations(c332)}，合法样本 {syncopations(_base())}")

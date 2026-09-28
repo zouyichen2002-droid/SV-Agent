@@ -367,7 +367,26 @@ def write_reveal(out: pathlib.Path, rows: list[dict], totals: dict) -> None:
     (out / "reveal.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def remeasure(run: str) -> int:
+    """检查器的量法改了以后，用存下的候选重新量一遍，重写揭晓 —— 不调模型、不花 token。"""
+    if not selftest_ok():
+        return 1
+    out = HERE / "out" / run
+    data = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    for r in data["rows"]:
+        p = out / f"{r['label']}.json"
+        if "metrics" in r and p.exists():
+            m = check.metrics(json.loads(p.read_text(encoding="utf-8")))
+            r["metrics"] = {k: v for k, v in m.items() if not k.startswith("_")}
+            r["constraints"] = check.constraint_report(m)
+    write_all(out, data["rows"], data["totals"])
+    print(f"已重新量：{out / 'reveal.md'}")
+    return 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--fill":
         raise SystemExit(fill(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] == "--remeasure":
+        raise SystemExit(remeasure(sys.argv[2]))
     raise SystemExit(main())
