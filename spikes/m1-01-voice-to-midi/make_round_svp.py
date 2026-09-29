@@ -10,10 +10,13 @@
 - 新的工程 uuid；导出设置改到本版的目录和文件名 —— 不会盖掉终稿的导出
 - 速度照终稿的 120 BPM（终稿就是 120；音按绝对时间放，和音频对齐）
 
-写完自检：用 compare_notes.tracks() 读回来，音数、每个音的起止（±1 ms）、音高、歌词逐个和源一致；
-两条音频的文件都在。不一致就不算写成（退出码 1）。
+`--with-final`（创作者 09-29：「把我自己创作的那个拿过来放到同一个项目中，我对比」）：
+再加一条「你的终稿」—— 终稿的 vocal1 原样搬过来（连同它引用的音符库组、参数、音高线，一个不改），文件名多个「_对比终稿」。
 
-    python make_round_svp.py <扒谱结果.mid> <版名，如 r01>
+写完自检：用 compare_notes.tracks() 读回来，音数、每个音的起止（±1 ms）、音高、歌词逐个和源一致；
+带了终稿的，终稿那条也要逐个音和终稿本身一致；音频文件都在。不一致就不算写成（退出码 1）。
+
+    python make_round_svp.py <扒谱结果.mid> <版名，如 r01> [--with-final]
 """
 from __future__ import annotations
 
@@ -39,8 +42,18 @@ def _new_ids(track: dict) -> dict:
     return track
 
 
-def build(notes: list, rnd: str, out_dir: pathlib.Path) -> dict:
+FINAL_NAME = "你的终稿（04-17 vocal1）"
+
+
+def build(notes: list, rnd: str, out_dir: pathlib.Path, with_final: bool = False, stem: str = "") -> dict:
     d = copy.deepcopy(C.load_svp(TEMPLATE))
+    final_track, final_groups = None, []
+    if with_final:                                        # 终稿的 vocal1 原样搬过来：轨道 + 它引用的音符库组
+        final_track = copy.deepcopy(next(t for t in d["tracks"] if t.get("name") == "vocal1"))
+        final_track["name"] = FINAL_NAME
+        wanted = {r["groupID"] for r in final_track.get("groups", [])}
+        final_groups = [copy.deepcopy(g) for g in d["library"] if g["uuid"] in wanted]
+        assert len(final_groups) == len(wanted), "终稿 vocal1 引用的音符库组没找全"
     tempo = d["time"]["tempo"]
     assert len(tempo) == 1, f"模板有 {len(tempo)} 个速度标记，这里只会换算单一速度"
     bpm = tempo[0]["bpm"]
@@ -75,18 +88,24 @@ def build(notes: list, rnd: str, out_dir: pathlib.Path) -> dict:
         prev_end = off
     g["notes"] = out
 
-    for i, t in enumerate((inst, ref_audio, vocal)):
+    tracks = [inst, ref_audio] + ([final_track] if final_track else []) + [vocal]
+    for i, t in enumerate(tracks):
         t["dispOrder"] = i
-    d["tracks"] = [inst, ref_audio, vocal]
-    d["library"] = []
+    d["tracks"] = tracks
+    d["library"] = final_groups
     d["uuid"] = str(uuid.uuid4())
-    d["renderConfig"].update(destination=str(out_dir / "render").replace("\\", "/"), filename=f"傍晚_扒谱_{rnd}")
+    d["renderConfig"].update(destination=str(out_dir / "render").replace("\\", "/"), filename=f"傍晚_扒谱_{rnd}{stem}")
     return d
 
 
-def selfcheck(path: pathlib.Path, notes: list, rnd: str) -> list[str]:
+def selfcheck(path: pathlib.Path, notes: list, rnd: str, with_final: bool = False) -> list[str]:
     d = C.load_svp(path)
     fails = []
+    if with_final:
+        mine = C.tracks(d).get(FINAL_NAME, [])
+        truth = C.tracks(C.load_svp(TEMPLATE))["vocal1"]
+        if mine != truth:
+            fails.append(f"终稿那条和终稿本身不一致：{len(mine)} 个音 vs {len(truth)} 个")
     got = C.tracks(d).get(f"扒谱 {rnd}", [])
     src = sorted(notes)
     if len(got) != len(src):
@@ -103,21 +122,24 @@ def selfcheck(path: pathlib.Path, notes: list, rnd: str) -> list[str]:
     return fails
 
 
-def main(src_mid: str, rnd: str) -> int:
+def main(src_mid: str, rnd: str, *flags: str) -> int:
+    with_final = "--with-final" in flags
+    stem = "_对比终稿" if with_final else ""
     notes = list(C.midi_tracks(src_mid).values())[0]
     out_dir = ROUNDS / rnd
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"傍晚_扒谱_{rnd}.svp"
+    path = out_dir / f"傍晚_扒谱_{rnd}{stem}.svp"
     if path.exists():
         raise SystemExit(f"{path} 已经有了 —— 每一版都写新文件，换个版名")
-    path.write_text(json.dumps(build(notes, rnd, out_dir), ensure_ascii=False), encoding="utf-8")
-    fails = selfcheck(path, notes, rnd)
-    print(f"写出 {path}（{len(notes)} 个音）")
-    print("自检：", "通过（读回来逐个音和源一致，两条音频都在）" if not fails else "不通过")
+    path.write_text(json.dumps(build(notes, rnd, out_dir, with_final, stem), ensure_ascii=False), encoding="utf-8")
+    fails = selfcheck(path, notes, rnd, with_final)
+    print(f"写出 {path}（扒谱 {len(notes)} 个音{'，另有你的终稿' if with_final else ''}）")
+    print("自检：", ("通过（读回来逐个音和源一致" + ("，终稿那条和终稿本身逐个音一致" if with_final else "") + "，音频都在）")
+          if not fails else "不通过")
     for f in fails:
         print("  ✗", f)
     return 1 if fails else 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1], sys.argv[2]))
+    raise SystemExit(main(*sys.argv[1:]))
