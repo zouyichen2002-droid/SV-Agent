@@ -77,16 +77,21 @@ def _signed_nearest(ref: np.ndarray, est: np.ndarray, o: float) -> np.ndarray:
 def midi_tracks(p) -> dict[str, list[tuple[float, float, float, str]]]:
     """.mid → {通道: [(起音秒, 时值秒, 音高音分, 歌词)]}。按 MIDI 自己的速度表换成秒（mido 逐条给秒）。
 
-    歌词：和 note_on 同一时刻的 lyrics 元事件算这个音的（他们工具箱的 write_midi 就这么写）。"""
+    歌词：和 note_on 同一时刻的 lyrics 元事件算这个音的，前后都认 ——
+    常规写法是歌词在前（Vocal2Midi 这么写），他们工具箱的 write_midi 是歌词在后。"""
     import mido
-    t, on, out, last = 0.0, {}, {}, None
+    t, on, out, last, pending = 0.0, {}, {}, None, None
     for msg in mido.MidiFile(str(p), charset="utf-8"):
         t += msg.time
         if msg.type == "note_on" and msg.velocity > 0:
             last = (msg.channel, msg.note)
-            on[last] = [t, ""]
-        elif msg.type == "lyrics" and last in on and on[last][0] == t:
-            on[last][1] = msg.text
+            on[last] = [t, pending[1] if pending and pending[0] == t else ""]
+            pending = None
+        elif msg.type == "lyrics":
+            if last in on and on[last][0] == t and not on[last][1]:
+                on[last][1] = msg.text
+            else:
+                pending = (t, msg.text)
         elif msg.type in ("note_off", "note_on") and (msg.channel, msg.note) in on:
             s, ly = on.pop((msg.channel, msg.note))
             out.setdefault(f"MIDI 通道 {msg.channel}", []).append((s, t - s, msg.note * 100.0, ly))

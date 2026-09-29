@@ -223,7 +223,7 @@ def main(wav: str, ref_svp: str, ref_track: str, *ests: str) -> int:
         print(f"\n{name}")
         for k, v in r.items():
             print(f"  {k}：{v}")
-    out = OUT / "m1-01_audio_oracle.json"
+    out = OUT / f"m1-01_audio_oracle_{pathlib.Path(wav).stem}.json"   # 按人声分轨分开存，换分轨不互相覆盖
     out.write_text(json.dumps({"vocal_stem": wav, "reference": ref_svp, "reference_track": ref_name,
                                "params": {"sr": SR, "hop": HOP, "frame": FRAME, "fmin_hz": round(FMIN, 2),
                                           "fmax_hz": round(FMAX, 2), "middle": MID, "voiced_min": VOICED_MIN,
