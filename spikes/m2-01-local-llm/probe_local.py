@@ -10,8 +10,9 @@
 3. 格式合不合：要它把 PRD 里 C01–C07 那张表转成 JSON，程序逐项核对（重试也算进去）
 4. 中文好不好：一道歌词问题，答案原样给创作者看（不写进任何记忆）
 
-    python probe_local.py [--ctx 8192] [--port 8081]
-服务由脚本自己起、测完自己关，不留后台进程。结果写在仓库外 E:/sv-agent-data/probes/m2-01-local-llm/。
+    python probe_local.py [--ctx 8192] [--port 8081] [--server <llama-server.exe>] [--device Vulkan0|CUDA0] [--tag _cuda]
+服务由脚本自己起、测完自己关，不留后台进程。结果写在仓库外 E:/sv-agent-data/probes/m2-01-local-llm/
+（result<tag>.json、server<tag>.log；09-29 先测了 Vulkan 版，创作者说「可以换 CUDA 版试试」→ 同一套题再测一遍）。
 """
 from __future__ import annotations
 
@@ -94,14 +95,25 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ctx", type=int, default=8192)
     ap.add_argument("--port", type=int, default=8081)
+    ap.add_argument("--server", default=str(SERVER))
+    ap.add_argument("--device", default="Vulkan0")
+    ap.add_argument("--tag", default="")
+    ap.add_argument("--kv8", action="store_true", help="KV 缓存压成 8 位（-ctk q8_0 -ctv q8_0），腾显存给模型")
+    ap.add_argument("--skip-think", action="store_true", help="跳过开思考那项（最费时间）")
+    ap.add_argument("--mtp", action="store_true", help="用模型自带的 MTP 草稿层做推测解码（--spec-type draft-mtp）")
     a = ap.parse_args()
+    server = pathlib.Path(a.server)
     OUT.mkdir(parents=True, exist_ok=True)
-    log_path = OUT / "server.log"
-    cmd = [str(SERVER), "-m", str(MODEL), "--host", "127.0.0.1", "--port", str(a.port), "-c", str(a.ctx),
-           "--device", "Vulkan0", "--fit", "on", "--reasoning-format", "deepseek", "-np", "1"]
-    res: dict = {"model": MODEL.name, "server": SERVER.parent.name, "cmd": cmd}
+    log_path = OUT / f"server{a.tag}.log"
+    cmd = [str(server), "-m", str(MODEL), "--host", "127.0.0.1", "--port", str(a.port), "-c", str(a.ctx),
+           "--device", a.device, "--fit", "on", "--reasoning-format", "deepseek", "-np", "1"]
+    if a.kv8:
+        cmd += ["-ctk", "q8_0", "-ctv", "q8_0"]
+    if a.mtp:
+        cmd += ["--spec-type", "draft-mtp"]
+    res: dict = {"model": MODEL.name, "server": server.parent.name, "device": a.device, "cmd": cmd}
     with open(log_path, "w", encoding="utf-8", errors="replace") as log:
-        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=str(SERVER.parent))
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=str(server.parent))
         try:
             res["载入_秒"] = round(wait_ready(a.port, proc), 1)
             print(f"载入：{res['载入_秒']} 秒")
@@ -115,10 +127,11 @@ def main() -> int:
             res["中文问答"] = {"问": q, "答": r["choices"][0]["message"]["content"], **speed(r)}
             print(f"\n中文问答（关思考）：{speed(r)}\n{res['中文问答']['答']}\n")
 
-            r = post(a.port, {"messages": [{"role": "user", "content": q}], "max_tokens": 3000, "temperature": 0.7})
-            m = r["choices"][0]["message"]
-            res["中文问答_开思考"] = {"思考字数": len(m.get("reasoning_content") or ""), "答": m.get("content"), **speed(r)}
-            print(f"中文问答（开思考）：{speed(r)} · 思考了 {res['中文问答_开思考']['思考字数']} 个字")
+            if not a.skip_think:
+                r = post(a.port, {"messages": [{"role": "user", "content": q}], "max_tokens": 3000, "temperature": 0.7})
+                m = r["choices"][0]["message"]
+                res["中文问答_开思考"] = {"思考字数": len(m.get("reasoning_content") or ""), "答": m.get("content"), **speed(r)}
+                print(f"中文问答（开思考）：{speed(r)} · 思考了 {res['中文问答_开思考']['思考字数']} 个字")
 
             res["JSON"] = json_test(a.port, no_think)
             print(f"\nJSON：一次就对 {res['JSON']['一次就对']} · 最终对 {res['JSON']['最终对']} · 尝试 {res['JSON']['尝试']}")
@@ -129,8 +142,8 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 proc.kill()
             res["服务已关"] = proc.poll() is not None
-    (OUT / "result.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n服务已关：{res['服务已关']} · 结果：{OUT / 'result.json'} · 日志：{log_path}")
+    (OUT / f"result{a.tag}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"\n服务已关：{res['服务已关']} · 结果：{OUT / f'result{a.tag}.json'} · 日志：{log_path}")
     return 0
 
 
