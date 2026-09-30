@@ -56,10 +56,18 @@ def lag_corr(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return float(-lags[m][i] / 8.0), float(c[m][i] / math.sqrt(float(np.dot(x, x)) * float(np.dot(y, y)) + 1e-12))
 
 
-def pick(files: list[str], out: pathlib.Path, *words: str) -> pathlib.Path:
-    """按括号里的名字挑输出（不分大小写）：各模型起名不一样 —— vocals_mel_band_roformer 叫 (vocals) / (other)。"""
+def pick(files: list[str], out: pathlib.Path, src: pathlib.Path, *words: str) -> pathlib.Path:
+    """按括号里的名字挑输出（不分大小写）：各模型起名不一样 —— vocals_mel_band_roformer 叫 (vocals) / (other)，
+    karaoke 叫 (Vocals) / (Instrumental)（这个模型的用途是「去掉主唱」：Vocals = 主唱，Instrumental = 剩下的叠唱）。
+    **只看输入文件名后面新加的那段**：第二步的输入名里本来就带「(vocals)」，09-30 就这么把主唱、叠唱标反过一次。"""
+    tail = {}
+    for f in files:
+        name = pathlib.Path(f).name
+        if not name.startswith(src.stem):
+            raise SystemExit(f"输出名 {name} 不是以输入名 {src.stem} 开头的，认不出")
+        tail[f] = name[len(src.stem):].lower()
     for w in words:
-        hit = [f for f in files if f"({w.lower()})" in pathlib.Path(f).name.lower()]
+        hit = [f for f in files if f"({w.lower()})" in tail[f]]
         if hit:
             p = pathlib.Path(hit[0])
             return p if p.is_absolute() else out / p
@@ -90,7 +98,7 @@ def main(src: str, out_dir: str, threads: str = "8") -> int:
     if len(files1) < 2:
         sep.load_model(model_filename=VOCAL_MODEL)
         files1 = sep.separate(src)
-    vocals, inst = pick(files1, out, "vocals"), pick(files1, out, "instrumental", "other")
+    vocals, inst = pick(files1, out, pathlib.Path(src), "vocals"), pick(files1, out, pathlib.Path(src), "instrumental", "other")
     log["step1"] = {"model": VOCAL_MODEL, "seconds": round(time.perf_counter() - t0, 1), "vocals": str(vocals), "instrumental": str(inst)}
     print(f"① 人声 / 伴奏：{log['step1']['seconds']} 秒 → {vocals.name} · {inst.name}", flush=True)
 
@@ -99,7 +107,7 @@ def main(src: str, out_dir: str, threads: str = "8") -> int:
     if len(files2) < 2:
         sep.load_model(model_filename=KARAOKE_MODEL)
         files2 = sep.separate(str(vocals))
-    lead = pick(files2, out, "vocals", "lead", "karaoke")
+    lead = pick(files2, out, vocals, "vocals", "lead")
     back = pathlib.Path(next(f for f in files2 if pathlib.Path(f).name != lead.name))
     back = back if back.is_absolute() else out / back
     log["step2"] = {"model": KARAOKE_MODEL, "seconds": round(time.perf_counter() - t0, 1), "lead": str(lead), "backing": str(back)}
@@ -125,6 +133,8 @@ def main(src: str, out_dir: str, threads: str = "8") -> int:
         fails.append(f"人声 + 伴奏 和原曲对不上（晚 {lag1:.1f} ms、相关 {r1:.3f}）")
     if abs(lag2) > 1.0 or r2 < 0.95:
         fails.append(f"主唱 + 叠唱 和人声对不上（晚 {lag2:.1f} ms、相关 {r2:.3f}）")
+    if e(ld) <= e(bk):     # 上面几条对主唱 / 叠唱是对称的，标反了查不出来 —— 主唱一般比叠唱响
+        fails.append(f"主唱（{e(ld)} dB）不比叠唱（{e(bk)} dB）响 —— 可能标反了，去听")
     log["fails"] = fails
     (out / "separate_log.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     for k, v2 in checks.items():
