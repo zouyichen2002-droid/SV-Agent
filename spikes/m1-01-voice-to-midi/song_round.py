@@ -120,10 +120,16 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
     d0 = C.load_svp(cfg["template"])
     d = RT.retime(d0, {"meter": [{"index": 0, "numerator": 4, "denominator": 4}], "tempo": tempo})
     tmpl = next(t for t in d["tracks"] if t.get("name") == cfg["vocal_template_track"])
+    acc_in_tmpl = pathlib.Path(cfg.get("template_accomp") or cfg["accomp"]).name   # 模板里原来那条伴奏的文件名
     for t in d["tracks"]:
         if t["mainRef"].get("audio"):
-            # 伴奏以外的音频轨都当参考人声：改名、静音；配置里给了 ref_vocal_audio（比如新分出来的主唱）就换成它
-            if pathlib.Path(t["mainRef"]["audio"]["filename"]).name != pathlib.Path(cfg["accomp"]).name:
+            if pathlib.Path(t["mainRef"]["audio"]["filename"]).name == acc_in_tmpl:
+                # 伴奏：配置里的伴奏换进去（换了分离模型时和模板里的不是同一个文件；位置不动）
+                t["mainRef"]["audio"]["filename"] = str(cfg["accomp"]).replace("\\", "/")
+                if cfg.get("accomp_name"):
+                    t["name"] = cfg["accomp_name"]
+            else:
+                # 伴奏以外的音频轨都当参考人声：改名、静音；配置里给了 ref_vocal_audio（比如新分出来的主唱）就换成它
                 if cfg.get("ref_vocal_audio"):
                     t["mainRef"]["audio"]["filename"] = str(cfg["ref_vocal_audio"]).replace("\\", "/")
                 t["name"], t["mainRef"]["mute"] = cfg.get("ref_vocal_name", "原唱人声（参考，静音）"), True
@@ -190,6 +196,13 @@ def check(path: pathlib.Path, cfg: dict, tempo: list[dict], rows: list[dict], tr
     a1 = RT.timeline(d)["audio"]
     if sorted(round(v, 6) for v in a0.values()) != sorted(round(v, 6) for v in a1.values()):
         fails.append("音频位置变了")
+    audio = [t for t in d["tracks"] if t["mainRef"].get("audio")]
+    playing = [t["mainRef"]["audio"]["filename"] for t in audio if not t["mainRef"].get("mute")]
+    if playing != [str(cfg["accomp"]).replace("\\", "/")]:
+        fails.append(f"没静音的音频轨应该只有给的伴奏，实际是 {playing}")
+    for t in audio:
+        if not pathlib.Path(t["mainRef"]["audio"]["filename"]).exists():
+            fails.append(f"音频文件不存在：{t['mainRef']['audio']['filename']}")
     if d["time"]["tempo"] != tempo:
         fails.append("速度表不是给的那张")
     return fails

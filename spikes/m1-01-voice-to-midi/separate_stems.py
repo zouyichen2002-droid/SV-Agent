@@ -67,8 +67,9 @@ def pick(files: list[str], out: pathlib.Path, *words: str) -> pathlib.Path:
 
 
 def done(out: pathlib.Path, src: pathlib.Path, model: str) -> list[str]:
-    """这个模型对这个输入已经分过了（输出都在）→ 不重算。"""
-    stem = model.rsplit(".", 1)[0]
+    """这个模型对这个输入已经分过了（输出都在）→ 不重算。
+    输出名里的模型名和 audio-separator 一样截到第一个点（…_sdr_10.1956.ckpt → …_sdr_10）。"""
+    stem = model.split(".")[0]
     return sorted(str(p) for p in out.glob(f"{src.stem}_(*)_{stem}.wav"))
 
 
