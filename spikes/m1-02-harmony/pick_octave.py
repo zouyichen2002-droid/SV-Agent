@@ -263,17 +263,10 @@ def selftest() -> list[str]:
     return fails
 
 
-def main(base_json: str, rnd: str) -> int:
-    fails = selftest()
-    print("自检：", "通过（三稿的例子都测：叠唱句整句取上、单独掉下去的拉回来、真大跳和平滑旋律不动、不出音域）"
-          if not fails else "不通过")
-    for f in fails:
-        print("  ✗", f)
-    if fails:
-        return 1
+def pick(notes: list) -> tuple[list, list[int], list[str], list[int]]:
+    """只算、不写：→ (挑过八度的音, 新音高, 每个音用的哪种, 录音里另一个八度的方向)。回归检查（regress_r05.py）只调这个。"""
     import numpy as np
     import soundfile as sf
-    notes = sorted(tuple(x) for x in json.load(open(base_json, encoding="utf-8")))
     y, sr = sf.read(R.VOCAL_STEM, dtype="float32")
     y = y.mean(axis=1) if y.ndim > 1 else y
     bp = json.loads(M.BP_RAW.read_text(encoding="utf-8"))
@@ -287,6 +280,20 @@ def main(base_json: str, rnd: str) -> int:
     other = [direction[k] // 100 if flags[k] else 0 for k in range(len(notes))]
     new, why = upper_then_fix(notes, other, lo, hi)
     out = [(s, d, float(new[k] * 100 + (c - ps[k] * 100)), ly) for k, (s, d, c, ly) in enumerate(notes)]
+    return out, new, why, other
+
+
+def main(base_json: str, rnd: str) -> int:
+    fails = selftest()
+    print("自检：", "通过（三稿的例子都测：叠唱句整句取上、单独掉下去的拉回来、真大跳和平滑旋律不动、不出音域）"
+          if not fails else "不通过")
+    for f in fails:
+        print("  ✗", f)
+    if fails:
+        return 1
+    notes = sorted(tuple(x) for x in json.load(open(base_json, encoding="utf-8")))
+    out, new, why, other = pick(notes)
+    ps = [int(round(c / 100)) for _, _, c, _ in notes]
     changes = [f"{fmt(notes[k][0])}「{notes[k][3]}」{nm(ps[k])} → {nm(new[k])}（{why[k]}）"
                for k in range(len(notes)) if new[k] != ps[k]]
     lead = C.tracks(C.load_svp(M.FINAL))["vocal1"]
