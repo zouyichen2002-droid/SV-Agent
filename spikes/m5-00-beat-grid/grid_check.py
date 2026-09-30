@@ -95,6 +95,12 @@ def fold(t: np.ndarray, w: np.ndarray, bpm: float, t0: float) -> tuple[float, fl
     return float(abs(z)), float(math.atan2(z.imag, z.real) / (2 * math.pi) * d * 1000)
 
 
+def null_for(bpm: float) -> np.ndarray:
+    """偶然水平用的「错的速度」：NULL_BPM 是按 132 定的（差 3–6%）；离 132 远的歌按比例缩放，不然会碰上真速度的简单倍数
+    （86 × 3/2 = 129 正好在 124–140 里）。离 132 不到 5 BPM（《傍晚》）就原样用，结果和以前一模一样。"""
+    return NULL_BPM if abs(bpm - 132.0) <= 5.0 else NULL_BPM * bpm / 132.0
+
+
 def lock_table(t: np.ndarray, w: np.ndarray, bpm: float, t0: float, end: float) -> list[dict]:
     """每 15 秒一段：R 比「错的速度」（差 3–6%）折出来的高几个标准差（z ≥ 4 算锁住），锁住的段平均偏差多少。"""
     rows = []
@@ -104,7 +110,7 @@ def lock_table(t: np.ndarray, w: np.ndarray, bpm: float, t0: float, end: float) 
             rows.append({"from_s": float(lo), "locked": False, "z": None})
             continue
         r, ph = fold(t[m], w[m], bpm, t0)
-        null = np.array([fold(t[m], w[m], b, t0)[0] for b in NULL_BPM])
+        null = np.array([fold(t[m], w[m], b, t0)[0] for b in null_for(bpm)])
         z = float((r - null.mean()) / (null.std() + 1e-12))
         rows.append({"from_s": float(lo), "R": round(r, 3), "z": round(z, 1), "locked": z >= Z_LOCK, "phase_ms": round(ph, 1)})
     return rows
@@ -167,7 +173,7 @@ def refine_end(curves: dict[str, tuple[np.ndarray, np.ndarray]], bpm: float, t0:
     end, log = None, []
     for lo in np.arange(max(s_from, s_to - 2 * WIN), s_to + WIN / 2, 2.0):
         r, ph = combo_fold(curves, lo, lo + 8.0, bpm, t0)
-        null = np.array([combo_fold(curves, lo, lo + 8.0, b, t0)[0] for b in NULL_BPM])
+        null = np.array([combo_fold(curves, lo, lo + 8.0, b, t0)[0] for b in null_for(bpm)])
         z = float((r - null.mean()) / (null.std() + 1e-12))
         dev = (ph - ref_ms + d / 2) % d - d / 2
         ok = z >= Z_LOCK and abs(dev) <= LIMIT * 1000
@@ -179,10 +185,12 @@ def refine_end(curves: dict[str, tuple[np.ndarray, np.ndarray]], bpm: float, t0:
     return (end if end is not None else s_to), log
 
 
-def local_tempo(curves: dict[str, tuple[np.ndarray, np.ndarray]], lo: float, hi: float) -> float:
-    """这一窗自己最合的速度：96–140 BPM 每 0.05 扫一遍，按拍、八分、十六分各折一次加起来取最大。只用来描述尾声，不判对错。
-    只按拍和八分折不行：一串十六分正好在拍和八分线之间抵消，速度对反而折不出来（自检里栽过：120 扫成 113.85）。"""
-    scan = np.arange(96.0, 140.001, 0.05)
+def local_tempo(curves: dict[str, tuple[np.ndarray, np.ndarray]], lo: float, hi: float,
+                bpm_lo: float = 96.0, bpm_hi: float = 140.0) -> float:
+    """这一窗自己最合的速度：bpm_lo–bpm_hi（默认 96–140，《傍晚》那档）每 0.05 扫一遍，按拍、八分、十六分各折一次加起来取最大。
+    只用来描述尾声，不判对错。只按拍和八分折不行：一串十六分正好在拍和八分线之间抵消，速度对反而折不出来（自检里栽过：120 扫成 113.85）。
+    扫的范围要跟着这首歌的速度定：别的歌用默认范围会扫出假的数（《潮声回响》86 BPM 被扫成 129 = 86 × 3/2）。"""
+    scan = np.arange(bpm_lo, bpm_hi + 0.001, 0.05)
     r = [sum(combo_fold(curves, lo, hi, b, 0.0, s)[0] for s in (1, 2, 4)) for b in scan]
     return float(scan[int(np.argmax(r))])
 

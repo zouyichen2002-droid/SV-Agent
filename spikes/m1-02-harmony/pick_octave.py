@@ -263,13 +263,14 @@ def selftest() -> list[str]:
     return fails
 
 
-def pick(notes: list) -> tuple[list, list[int], list[str], list[int]]:
-    """只算、不写：→ (挑过八度的音, 新音高, 每个音用的哪种, 录音里另一个八度的方向)。回归检查（regress_r05.py）只调这个。"""
+def pick(notes: list, vocal_wav: str | None = None, bp_raw: str | None = None) -> tuple[list, list[int], list[str], list[int]]:
+    """只算、不写：→ (挑过八度的音, 新音高, 每个音用的哪种, 录音里另一个八度的方向)。回归检查（regress_r05.py）只调这个。
+    vocal_wav / bp_raw 不给就是《傍晚》的（人声分轨、basic-pitch 原样输出）；换歌时传这首的。"""
     import numpy as np
     import soundfile as sf
-    y, sr = sf.read(R.VOCAL_STEM, dtype="float32")
+    y, sr = sf.read(vocal_wav or R.VOCAL_STEM, dtype="float32")
     y = y.mean(axis=1) if y.ndim > 1 else y
-    bp = json.loads(M.BP_RAW.read_text(encoding="utf-8"))
+    bp = json.loads(pathlib.Path(bp_raw).read_text(encoding="utf-8") if bp_raw else M.BP_RAW.read_text(encoding="utf-8"))
     lower_db = [O.lower_octave_index(y, sr, s, d, O.hz(c)) for s, d, c, _ in notes]
     thr_db = float(np.median([v for v in lower_db if v is not None])) + M.DOWN_MARGIN_DB
     ps = [int(round(c / 100)) for _, _, c, _ in notes]
