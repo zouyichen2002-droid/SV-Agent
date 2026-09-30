@@ -79,13 +79,15 @@ def repair(notes: list, chars: list[str], pys: list[str]) -> tuple[list, list[di
 
 def sung_differently(asr_notes: list, chars: list[str], pys: list[str], log: list[dict]) -> list[dict]:
     """只靠听写那一版：歌词里的字，听写出来明显不一样（不是近似音）→ Suno 可能唱成了别的字。
-    修歌词时动过的地方（漂移处）不报 —— 那里只靠听写的对齐本来就乱，报出来是噪声。"""
-    touched = {x["时间"] for x in log}
+    漂移处（补空位、拆音）前后 1 秒不报 —— 那里只靠听写的对齐本来就乱，报出来是噪声。
+    （09-29 第一版把所有改过的地方都排除了 → 以 r01 为底子时「换字」全被排除、一处都不报，已改。）"""
+    sec = lambda t: int(t.split(":")[0]) * 60 + float(t.split(":")[1])
+    drift = [sec(x["时间"]) for x in log if x["动作"] in ("补空位", "拆音（字比音多）")]
     sung = [n for n in sorted(asr_notes) if n[3] not in E.SKIP]
     ops = A.align(pys, [n[3] for n in sung])
     out = []
     for i, j, k in ops:
-        if k == "不一样" and fmt(sung[j][0]) not in touched:
+        if k == "不一样" and all(abs(sung[j][0] - t) > 1.0 for t in drift):
             out.append({"时间": fmt(sung[j][0]), "你的歌词": f"{chars[i]}（{pys[i]}）", "Suno 唱的像": sung[j][3]})
     return out
 
