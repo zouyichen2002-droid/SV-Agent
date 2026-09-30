@@ -55,8 +55,23 @@ def main() -> int:
     ap.add_argument("--lyric-mode", default="pinyin", choices=["pinyin", "hanzi"], help="导出的歌词用拼音还是汉字（终稿用的是拼音）")
     ap.add_argument("--device", default="dml")
     ap.add_argument("--nsteps", type=int, default=8)
+    ap.add_argument("--batch-size", type=int, default=4,
+                    help="GAME 一次算几段（它自己的默认 4）。《潮声回响》4 段一起算显存放不下、换 CPU 吃掉 21 GB 内存 → 用 1")
+    ap.add_argument("--asr-batch-size", type=int, default=4, help="听写一次算几段（它自己的默认 4）")
+    ap.add_argument("--slicing", default="auto",
+                    help="切片的办法（auto = 它的 default）。《潮声回响》和声、混响连成一片，default 切出 69 秒的段、GAME 显存爆掉；"
+                         "heuristic 会在最长 10 秒内找最安静的地方强制切")
+    ap.add_argument("--low-priority", action="store_true",
+                    help="进程优先级调成「低于正常」（它开的子进程跟着低）—— 跑得久也不跟创作者抢机器（09-30 他说「好卡啊」）")
     a = ap.parse_args()
     with_lyrics = bool(a.asr or a.lyrics)
+    if a.low_priority and sys.platform == "win32":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p              # 句柄要按指针宽度传；不设的话 64 位上传坏、调用静默失败（09-30 栽过）
+        k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        if not k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000):   # BELOW_NORMAL_PRIORITY_CLASS
+            print("（没调成低优先级）", flush=True)
 
     _stub_pyopenjtalk()
     from inference.pipeline.auto_lyric_hybrid import auto_lyric_hybrid_pipeline  # noqa: E402  他们的流水线
@@ -75,15 +90,17 @@ def main() -> int:
         device=a.device, ts=ts, language="zh",
         lyric_output_mode=a.lyric_mode, original_lyrics=lyrics,
         output_formats=["mid", "txt", "csv"],
-        slicing_method="auto", tempo=120.0, quantization_step=0, quantization_mode="smart",
+        slicing_method=a.slicing, tempo=120.0, quantization_step=0, quantization_mode="smart",
         pitch_format="name", round_pitch=True,
         seg_threshold=0.2, seg_radius=0.02, est_threshold=0.2,
         output_lyrics=with_lyrics,
+        batch_size=a.batch_size, asr_batch_size=a.asr_batch_size,
     )
     secs = time.perf_counter() - t0
     made = sorted(p.name for p in out.glob(f"{a.name}*"))
     mode = "lyrics+reference" if a.lyrics else ("lyrics-asr-only" if a.asr else "no-lyrics")
     info = {"audio": a.audio, "mode": mode, "lyric_mode": a.lyric_mode, "device": a.device,
+            "batch_size": a.batch_size, "asr_batch_size": a.asr_batch_size, "low_priority": a.low_priority, "slicing": a.slicing,
             "ts": ts, "seconds": round(secs, 1), "outputs": made}
     (out / f"{a.name}_run.json").write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"Vocal2Midi（{info['mode']}，{a.device}）：{secs:.1f} 秒 · 产物 {made}")

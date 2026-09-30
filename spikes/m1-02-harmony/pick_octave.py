@@ -280,6 +280,16 @@ def pick(notes: list, vocal_wav: str | None = None, bp_raw: str | None = None) -
     flags = M.runs_filter(notes, [x != 0 for x in direction])
     other = [direction[k] // 100 if flags[k] else 0 for k in range(len(notes))]
     new, why = upper_then_fix(notes, other, lo, hi)
+    # 录音当第二个裁判（09-30《潮声回响》加的）：只靠前后音判的「单独翘上去的，拉回来」（往下拉），basic-pitch 在那一刻
+    # 只听到原来的八度、没听到改后的 → 不拉（这首 1:59.5 的 G5、2:34.8 的 A4 就是被前后音错拉下来的真高音）。
+    # 只管往下拉的：往上拉的（单独掉下去的）不管 —— 叠唱段两个八度一起唱，basic-pitch 常只听到响的那个；
+    # 《傍晚》1:59.1 那个就是：整句取上以后把掉下去的一个拉上来，录音里只听到下面那个，照这条改回去反而把句子改坏了
+    for k, w in enumerate(why):
+        if w.startswith("单独翘上去") and new[k] != ps[k]:
+            s, d = notes[k][0], notes[k][1]
+            seen = {n["pitch"] for n in bp if n["start"] < s + d - 0.02 and n["end"] > s + 0.02}
+            if ps[k] in seen and new[k] not in seen:
+                new[k], why[k] = ps[k], "原样（录音里只听到原来的八度，不拉）"
     out = [(s, d, float(new[k] * 100 + (c - ps[k] * 100)), ly) for k, (s, d, c, ly) in enumerate(notes)]
     return out, new, why, other
 

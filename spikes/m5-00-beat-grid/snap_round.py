@@ -56,7 +56,7 @@ def snap_track(d_in: dict, name: str, new_name: str, one: float, T: float, end: 
         if r["k16"] is not None:
             if r["k16"] < 16:
                 raise SystemExit("有音在第 1 小节（第 1 小节的速度不是实测速度），这里不处理")
-            n["onset"], n["duration"] = r["k16"] * Q // 4, r["dur16"] * Q // 4
+            n["onset"], n["duration"] = round(r["k16"] * Q / 4), round(r["dur16"] * Q / 4)
         new.append(n)
     tr["mainGroup"]["notes"] = new
     tr["name"] = new_name
@@ -75,7 +75,7 @@ def check(d_in: dict, d_out: dict, name: str, new_name: str, res: list[dict], on
             fails.append(f"音高或歌词变了：{ly} {cy} → {lx} {cx}")
             break
         if r["k16"] is not None:
-            if abs((x - one) / U - round((x - one) / U)) * U > TOL or abs(x - r["q_on_s"]) > TOL:
+            if abs((x - one) / (U / 2) - round((x - one) / (U / 2))) * (U / 2) > TOL or abs(x - r["q_on_s"]) > TOL:
                 fails.append(f"「{lx}」{x:.3f}s 没压在十六分线上")
                 break
         elif abs(x - y) > TOL or abs((x + dx) - (y + dy)) > TOL:

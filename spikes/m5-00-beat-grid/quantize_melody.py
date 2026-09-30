@@ -72,10 +72,19 @@ def quantize(notes: list[tuple], one: float, T: float, end: float, ref_onsets: n
                 if abs(x2 - round(x2)) <= AMB:
                     k[i], helped[i], amb[i] = int(round(x2)), True, False
     bumped = np.zeros(len(on), bool)
+    half = np.zeros(len(on), bool)
+    kq = k.astype(float)                                          # 撞格时允许半格（三十二分）
     idx = np.where(grid)[0]
-    for a, b in zip(idx[:-1], idx[1:]):
-        if k[b] <= k[a]:
-            k[b], bumped[b] = k[a] + 1, True
+    for pos in range(1, len(idx)):
+        a, b = idx[pos - 1], idx[pos]
+        if kq[b] <= kq[a]:
+            nxt = idx[pos + 1] if pos + 1 < len(idx) else None
+            # 离前一个音不到 3/4 格（多是快的装饰音、或修歌词拆出来的）→ 放半格（三十二分），比挪一整格离原位置近；
+            # 离得远、而且往后挪一格不撞下一个音（按它自己吸到的格）→ 挪一格；否则也放半格 —— 不连环往后推
+            # （09-30《潮声回响》1:49 一串快音：一格一格往后推，最后一个被推出去 156 ms；别处单个挤格的挪一整格，晚了 140–180 ms）
+            far = x[b] - kq[a] >= 0.75
+            step = 1.0 if far and (nxt is None or kq[a] + 1 < k[nxt]) else 0.5
+            kq[b], bumped[b], half[b] = kq[a] + step, True, step < 1
     trip = np.zeros(len(on), bool)
     beat_of = np.floor((on - one - bias) / T + 1 / 8).astype(int)
     for bt in np.unique(beat_of[grid]):
@@ -96,24 +105,27 @@ def quantize(notes: list[tuple], one: float, T: float, end: float, ref_onsets: n
             row["flags"].append("尾声，没有网格（原样）")
             out.append(row)
             continue
-        q_on = one + k[i] * U
+        as_num = lambda v: int(v) if float(v).is_integer() else float(v)                         # noqa: E731
+        q_on = one + kq[i] * U
         nxt = i + 1 if i + 1 < len(on) and grid[i + 1] else None
         if nxt is not None and on[nxt] - off[i] < U / 2:
-            k_off = int(k[nxt])                                    # 连着唱
+            k_off = kq[nxt]                                        # 连着唱
         else:
-            k_off = int(round((off[i] - one - bias) / U))
-        k_off = max(k_off, int(k[i]) + 1)
+            k_off = float(round((off[i] - one - bias) / U))
+        shortest = 1.0 if kq[i].is_integer() and (nxt is None or kq[nxt] - kq[i] >= 1) else 0.5   # 半格上的音至少半格
+        k_off = max(k_off, kq[i] + shortest)
         if nxt is not None:
-            k_off = min(k_off, int(k[nxt]))
-        b16 = int(k[i])
-        row.update(q_on_s=round(q_on, 4), q_off_s=round(one + k_off * U, 4), k16=b16, bar=b16 // 16 + 1,
-                   beat=(b16 % 16) // 4 + 1, pos16=b16 % 16, dur16=k_off - b16, shift_ms=round((q_on - t0) * 1000, 1))
+            k_off = min(k_off, kq[nxt])
+        b16 = as_num(kq[i])
+        row.update(q_on_s=round(q_on, 4), q_off_s=round(one + k_off * U, 4), k16=b16, bar=int(b16 // 16) + 1,
+                   beat=int((b16 % 16) // 4) + 1, pos16=as_num(b16 % 16), dur16=as_num(k_off - b16),
+                   shift_ms=round((q_on - t0) * 1000, 1))
         if amb[i]:
             row["flags"].append("拿不准（离两条线差不多远）")
         if helped[i]:
             row["flags"].append("靠 AI 起音定的")
         if bumped[i]:
-            row["flags"].append("挤（和前一个音撞格，往后挪了一格）")
+            row["flags"].append("挤（和前一个音撞格，放在半格 / 三十二分上）" if half[i] else "挤（和前一个音撞格，往后挪了一格）")
         if trip[i]:
             row["flags"].append("可能是三连音（按十六分吸了）")
         out.append(row)
@@ -151,8 +163,11 @@ def selftest() -> list[str]:
     if r[0]["k16"] != 101 or not any("AI" in f for f in r[0]["flags"]):
         fails.append(f"拿不准的音，AI 起音在 101 格，结果 {r[0]['k16']} {r[0]['flags']}")
     r = run([(one + 200 * U, U / 2, 6000.0, "a"), (one + 200 * U + 0.02, U / 2, 6200.0, "b")])   # 注入：两个音挤一格
-    if r[1]["k16"] != 201 or not any("挤" in f for f in r[1]["flags"]):
-        fails.append(f"两个音挤在一格：{[x['k16'] for x in r]} {r[1]['flags']}")
+    if r[1]["k16"] != 200.5 or not any("三十二分" in f for f in r[1]["flags"]):          # 只差 20 ms：放半格
+        fails.append(f"两个音挤在一格（只差 20 ms）：应 200、200.5，吸成 {[x['k16'] for x in r]} {r[1]['flags']}")
+    r = run([(one + 250 * U, U / 2, 6000.0, "a"), (one + 250.8 * U + 0.001, U / 2, 6200.0, "b")])   # 差 0.8 格还挤一格：挪一整格
+    if r[1]["k16"] != 251:
+        fails.append(f"两个音差 0.8 格还挤一格：应 250、251，吸成 {[x['k16'] for x in r]}")
     r = run([(one + 300 * U, 2 * U - 0.03, 6000.0, "a"), (one + 302 * U, U, 6000.0, "b")])      # 结尾离下一个音 30 ms
     if r[0]["dur16"] != 2:
         fails.append(f"结尾离下一个音 30 ms，时值吸成 {r[0]['dur16']} 格（应连到下一个音 = 2 格）")
@@ -165,6 +180,11 @@ def selftest() -> list[str]:
     r = run([(one + T * 60, T / 4, 6000.0, "a"), (one + T * 60 + T * 3 / 4, T / 4, 6000.0, "b")])   # 0 和 3/4（附点）：不许标
     if any(any("三连音" in f for f in x["flags"]) for x in r):
         fails.append("0、3/4 拍（附点）被标成了三连音")
+    run_fast = [(one + 400 * U, U * 0.4, 6000.0, "a"), (one + 400.3 * U, U * 0.4, 6100.0, "b"),     # 注入：一串快音开头撞格
+                (one + 401 * U, U * 0.8, 6200.0, "c"), (one + 402 * U, U * 0.8, 6300.0, "d")]
+    r = run(run_fast)
+    if [x["k16"] for x in r] != [400, 400.5, 401, 402] or not any("三十二分" in f for f in r[1]["flags"]):
+        fails.append(f"快音开头撞格：应 400、400.5、401、402（不连环往后推），吸成 {[x['k16'] for x in r]}")
     return fails
 
 
@@ -219,7 +239,7 @@ def build(d_final: dict, results: dict[str, list[dict]], one: float, T: float, o
         for n0, r in zip(originals, results[src_name]):
             assert n0.get("lyrics", "") == r["lyric"], f"{src_name} 的音顺序对不上：{n0.get('lyrics')} ≠ {r['lyric']}"
             if r["k16"] is not None and r["k16"] >= 16:
-                a, b = r["k16"] * Q // 4, (r["k16"] + r["dur16"]) * Q // 4          # 第 2 小节起：十六分 = Q/4，整数
+                a, b = round(r["k16"] * Q / 4), round((r["k16"] + r["dur16"]) * Q / 4)   # 第 2 小节起：十六分 = Q/4（半格 = Q/8，也是整数）
             else:
                 a, b = round(RT.seconds_to_blick(r["q_on_s"], tempo)), round(RT.seconds_to_blick(r["q_off_s"], tempo))
             n = copy.deepcopy(n0)
@@ -256,7 +276,7 @@ def check_svp(path: pathlib.Path, d_final: dict, results: dict[str, list[dict]],
                 fails.append(f"{src} 有音的音高或歌词变了：{lb} {cb} → {la} {ca}")
                 break
             if r["k16"] is not None:
-                if abs((a - one) / U - round((a - one) / U)) * U > 0.001 or abs(a - r["q_on_s"]) > 0.001:
+                if abs((a - one) / (U / 2) - round((a - one) / (U / 2))) * (U / 2) > 0.001 or abs(a - r["q_on_s"]) > 0.001:
                     fails.append(f"{src}「{la}」{a:.3f}s 没压在十六分线上")
                     break
             elif abs(a - b) > 0.001 or abs((a + da) - (b + db)) > 0.001:
