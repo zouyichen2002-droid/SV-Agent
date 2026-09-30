@@ -9,7 +9,7 @@ the **Creative Commons Attribution-NonCommercial 4.0 International License (CC B
 - 协议全文 / Legal code：https://creativecommons.org/licenses/by-nc/4.0/legalcode
 - 中文摘要 / Summary：https://creativecommons.org/licenses/by-nc/4.0/deed.zh-hans
 
-署名 / Attribution：《傍晚》，作词 zouyichen2002-droid；原曲由 Suno 根据作者歌词生成；AI 扒谱：SV-Agent。
+署名 / Attribution：《傍晚》，作词 小鳄鱼aligator；原曲由 Suno 根据作者歌词生成；AI 扒谱：SV-Agent。
 
 不含：Suno 生成的音频、任何渲染出来的音频、Synthesizer V 声库（星尘）—— 这些不在本目录，也不在本许可范围内。
 Not included and not covered: Suno-generated audio, any rendered audio, and the Synthesizer V voice database (Stardust).
