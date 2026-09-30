@@ -41,6 +41,48 @@ Q = BG.Q
 TOL = 0.001
 
 
+FRAG = 0.040            # 短于 40 ms 的算碎片
+
+
+def merge_fragments(notes: list[tuple]) -> tuple[list[tuple], int]:
+    """GAME 切音的毛刺：短于 40 ms、和紧挨着的音同音高、中间空隙 ≤ 10 ms → 并进那个音（先看后一个，再看前一个）。
+    《潮声回响》新分离的人声扒出 16 个（如 109.694 s 10 ms + 109.704 s 7 ms，后面紧跟同音高 361 ms 的）；《傍晚》r01 一个都没有。
+    字：碎片上有字、那个音是拖音（-）或没字 → 字带过去。"""
+    out = [list(n) for n in sorted(notes)]
+    merged, i = 0, 0
+    same = lambda a, b: int(round(a[2] / 100)) == int(round(b[2] / 100))                   # noqa: E731
+    while i < len(out):
+        s, d, c, ly = out[i]
+        if d < FRAG:
+            nxt = out[i + 1] if i + 1 < len(out) else None
+            prv = out[i - 1] if i > 0 else None
+            if nxt and same(out[i], nxt) and nxt[0] - (s + d) <= 0.010:
+                nly = ly if nxt[3] in ("", "-") and ly not in ("", "-") else nxt[3]
+                out[i + 1] = [s, nxt[0] + nxt[1] - s, nxt[2], nly]
+                del out[i]
+                merged += 1
+                continue
+            if prv and same(out[i], prv) and s - (prv[0] + prv[1]) <= 0.010:
+                pl = ly if prv[3] in ("", "-") and ly not in ("", "-") else prv[3]
+                out[i - 1] = [prv[0], s + d - prv[0], prv[2], pl]
+                del out[i]
+                merged += 1
+                continue
+        i += 1
+    return [tuple(n) for n in out], merged
+
+
+def _fragment_selftest() -> list[str]:
+    fails = []
+    notes = [(1.000, 0.010, 7800.0, "a"), (1.010, 0.008, 7800.0, "-"), (1.018, 0.361, 7800.0, "-"),   # 碎片 ×2 + 真音
+             (2.000, 0.030, 6000.0, "b"), (2.030, 0.300, 6200.0, "c"),                                   # 短但音高不同：不动
+             (3.000, 0.030, 6000.0, "d"), (3.100, 0.300, 6000.0, "e")]                                   # 短但中间空 70 ms：不动
+    got, n = merge_fragments(notes)
+    if n != 2 or len(got) != 5 or got[0][0] != 1.000 or abs(got[0][1] - 0.379) > 1e-9 or got[0][3] != "a":
+        fails.append(f"碎片合并：{n} 次，结果 {got[:2]}")
+    return fails
+
+
 def quantize_on_map(notes: list[tuple], tempo: list[dict], metered: list[tuple[float, float]]) -> tuple[list[dict], float]:
     """有速度的段里：时间先按速度表换成「第几拍」，在拍上吸十六分（quantize_melody.quantize，一拍 = 1），再换回秒；自由段原样。"""
     beat = lambda t: RT.seconds_to_blick(t, tempo) / Q                               # noqa: E731
@@ -80,8 +122,11 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
     tmpl = next(t for t in d["tracks"] if t.get("name") == cfg["vocal_template_track"])
     for t in d["tracks"]:
         if t["mainRef"].get("audio"):
-            if pathlib.Path(t["mainRef"]["audio"]["filename"]).name == pathlib.Path(cfg["vocal_stem"]).name:
-                t["name"], t["mainRef"]["mute"] = f"原唱人声（参考，静音）", True
+            # 伴奏以外的音频轨都当参考人声：改名、静音；配置里给了 ref_vocal_audio（比如新分出来的主唱）就换成它
+            if pathlib.Path(t["mainRef"]["audio"]["filename"]).name != pathlib.Path(cfg["accomp"]).name:
+                if cfg.get("ref_vocal_audio"):
+                    t["mainRef"]["audio"]["filename"] = str(cfg["ref_vocal_audio"]).replace("\\", "/")
+                t["name"], t["mainRef"]["mute"] = cfg.get("ref_vocal_name", "原唱人声（参考，静音）"), True
         else:
             t["name"], t["mainRef"]["mute"] = f"对照：{t.get('name')}（模板里原来的，静音）", True
     ours = copy.deepcopy(tmpl)
@@ -161,7 +206,12 @@ def main(cfg_path: str) -> int:
     tm = json.loads(pathlib.Path(cfg["tempo_map"]).read_text(encoding="utf-8"))["map"]
     tempo, metered = tm["tempo"], [tuple(x) for x in tm["metered"]]
 
-    notes0 = sorted(E.load(cfg["v2m_mid"]))
+    fails = _fragment_selftest()
+    if fails:
+        print("碎片合并的自检不过：", fails)
+        return 1
+    notes0, n_frag = merge_fragments(sorted(E.load(cfg["v2m_mid"])))
+    print(f"GAME 的碎片（短于 {FRAG * 1000:.0f} ms、紧贴同音高）并掉 {n_frag} 个")
     chars, pys = E.text_pinyin(cfg["lyrics"])
     fails = RL.selftest(chars, pys)
     if fails:
