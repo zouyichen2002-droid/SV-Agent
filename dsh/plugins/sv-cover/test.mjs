@@ -109,6 +109,7 @@ try {
     assert.match(proj.notes.at(-1), /cover_run r01 完成，共 1 分钟/)
     const args = JSON.parse(readFileSync(join(P, '日志', 'args_r01.json'), 'utf8'))
     assert.ok(!args.includes('none'), '用了歌词')
+    assert.ok(!args.includes('--octave-pick'), '默认挑八度：不传开关')
     const stdout = jobs[0].spec.out.filter(([c]) => c === 'stdout').map(([, t]) => t).join('')
     assert.match(stdout, /分离 完成/, '模型看得到里程碑')
   })
@@ -151,6 +152,17 @@ try {
     assert.equal(readFileSync(join(P, '素材', '歌词_原文.txt'), 'utf8'), '新的一句\n')
     turnEnds()
     await jobs[3].hooks.done
+  })
+
+  await check('创作者说「这首不挑八度」→ octave_pick false → 告诉 Worker --octave-pick off（10-01 加的开关，默认开）', async () => {
+    const out = await run({ source: OK, octave_pick: false })
+    assert.match(out, /这一版不挑八度/)
+    turnEnds()
+    const outcome = await jobs[4].hooks.done
+    assert.equal(outcome.status, 'completed', JSON.stringify(outcome))
+    const id = readManifest(store, P).versions.at(-1).id
+    const args = JSON.parse(readFileSync(join(P, '日志', `args_${id}.json`), 'utf8'))
+    assert.deepEqual(args.slice(-2), ['--octave-pick', 'off'])
   })
 } finally {
   try { dispose?.() } catch { /* 没有 */ }

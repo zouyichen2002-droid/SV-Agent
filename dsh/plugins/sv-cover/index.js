@@ -180,6 +180,7 @@ export function apply(ctx, config) {
       properties: {
         source: { type: 'string', description: '原曲：http(s) 链接、本地音频的绝对路径，或「已有」（项目里已经有 素材\\原曲整首.wav）' },
         use_lyrics: { type: 'boolean', description: '用不用创作者给的歌词（默认用；创作者说这首没有歌词时填 false，只靠听写）' },
+        octave_pick: { type: 'boolean', description: '挑八度（默认开）：只有创作者说这首「不挑八度」时才填 false —— 音高全照 Vocal2Midi 扒的，不按《傍晚》学来的规矩改八度' },
         note: { type: 'string', description: '这一版要做什么，一句话，可省' },
       },
       required: ['source'],
@@ -205,6 +206,7 @@ export function apply(ctx, config) {
 
       // 歌词：从创作者最近的消息里原样取（不让模型重抄）
       const useLyrics = args?.use_lyrics !== false
+      const octavePick = args?.octave_pick !== false              // 创作者 10-01 定：加开关、默认开着
       let lyricNote = '这一版不用歌词，只靠听写'
       if (useLyrics) {
         const text = findLyrics(recent.get(session.id) ?? [])
@@ -255,7 +257,8 @@ export function apply(ctx, config) {
             if (cancelled) return { status: 'killed', detail: cancelled, result: `${label} 还没开始就停掉了；${id} 留着「进行中」` }
             const outFile = join(dir, '日志', `cover_${id}.out`)
             mkdirSync(join(dir, '日志'), { recursive: true })
-            let argv = [PYTHON, WORKER, dir, '--round', id, '--source', source, ...(useLyrics ? [] : ['--lyrics', 'none'])]
+            let argv = [PYTHON, WORKER, dir, '--round', id, '--source', source, ...(useLyrics ? [] : ['--lyrics', 'none']),
+              ...(octavePick ? [] : ['--octave-pick', 'off'])]
             if (useSandbox) {
               const policy = ctx.sandboxPolicy.resolve({ session })
               if (policy.mode !== 'danger-full-access') argv = (await ctx.sandbox.confine(argv, policy)).argv
@@ -308,7 +311,7 @@ export function apply(ctx, config) {
         },
       })
       running.set(dir, jobId)
-      return `开始了：${label}（后台任务 ${jobId}${resume ? `；接着上次没跑完的 ${id}，做完的步跳过` : ''}）。${lyricNote}。来源：${source}。约 15–25 分钟（分离约 2 分钟、找拍子十几分钟）；`
+      return `开始了：${label}（后台任务 ${jobId}${resume ? `；接着上次没跑完的 ${id}，做完的步跳过` : ''}）。${lyricNote}${octavePick ? '' : '；这一版不挑八度'}。来源：${source}。约 15–25 分钟（分离约 2 分钟、找拍子十几分钟）；`
         + '这段时间本地大模型会让出来，聊不了天；跑完自动载回，你会被唤醒、再告诉创作者结果。现在简短告诉创作者，然后结束这一轮。'
     },
   })

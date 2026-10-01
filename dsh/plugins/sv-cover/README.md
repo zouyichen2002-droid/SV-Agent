@@ -30,6 +30,9 @@ Worker 是我们自己的固定流程：模型只能给「来源」和「用不�
 
 语言（10-01）：插件不用管 —— Worker 按歌词自己认（有假名 → 日语，只有字母 → 英文），英文 / 日语的 svp 声库设成 SV 跨语种。
 
+挑八度开关（创作者 10-01 定：加开关、默认开着）：`cover_run` 的 `octave_pick`，创作者说「这首不挑八度」时 Agent 填 false → Worker `--octave-pick off`，
+这一版音高全照 Vocal2Midi 扒的；`说明.md` 里写明这一版开没开。为什么要这个开关：`docs/v3/s3-cover.md` §3.5。
+
 ## 怎么挂的
 
 和 sv-project / sv-artifact 一样：只用 Node 自带模块 + 同仓库的两个插件，在配置档补丁里用绝对路径挂成全局一行（见 `../../profile-web.cordis.patch.yml`）。

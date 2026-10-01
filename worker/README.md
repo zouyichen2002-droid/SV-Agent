@@ -4,7 +4,7 @@
 平时由 DSH 里的 `sv-cover` 插件在后台调（不进沙箱，原因见 `docs/v3/s3-cover.md` §5.1；只往这首歌的文件夹里写）；也可以自己直接跑：
 
 ```
-python cover_run.py <项目文件夹> --round rNN --source <链接 | 本地音频 | 已有> [--lyrics <歌词原文.txt> | --lyrics none] [--voice 星尘] [--language auto|zh|en|ja]
+python cover_run.py <项目文件夹> --round rNN --source <链接 | 本地音频 | 已有> [--lyrics <歌词原文.txt> | --lyrics none] [--voice 星尘] [--language auto|zh|en|ja] [--octave-pick on|off]
 ```
 
 | 步 | 用什么 | 写到哪 | 大约 |
@@ -17,7 +17,7 @@ python cover_run.py <项目文件夹> --round rNN --source <链接 | 本地音�
 | 扒谱 | Vocal2Midi（GAME + Qwen3-ASR，DirectML 显卡）；中文只听写，英文 / 日语把歌词交给它对齐 | `扒谱\` | 约 40 秒 |
 | 多声部 | basic-pitch（挑八度的第二个裁判） | `扒谱\basic_pitch_raw_主唱补段.json` | 约 10 秒 |
 | 模板 | `make_template.py`：声库从 `cover_config.json` 里的 base 抄（默认星尘） | `模板\` | 几秒 |
-| 生成工程 | `song_round.py`：中文修歌词只改字、挑八度、你定的规矩、吸格线；英文 / 日语挑八度、吸格线、声库设成 SV 跨语种 | `rNN\` + `说明.md` | 约 5 秒 |
+| 生成工程 | `song_round.py`：中文修歌词只改字、挑八度、你定的规矩、吸格线；英文 / 日语挑八度、吸格线、声库设成 SV 跨语种。`--octave-pick off` = 不挑八度（创作者 10-01 定：加开关、默认开） | `rNN\` + `说明.md` | 约 5 秒 |
 
 - **做完的步跳过**：中途断了，再跑一遍接着走（`rNN` 那一步除外：每一版都写新文件）
 - 每一步的输出在 `日志\<步>.log`；进度一行一个 JSON 在 `日志\进度.jsonl`（插件读它）；总结在 `日志\翻唱_rNN.json`
