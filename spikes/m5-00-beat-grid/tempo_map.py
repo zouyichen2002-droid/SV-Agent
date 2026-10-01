@@ -157,6 +157,11 @@ def build_map(grids: list[dict], joins: list[dict], dur: float) -> dict:
     anchors, metered, free, notes = [(0, 0.0)], [], [], []
     g0 = grids[0]
     start = g0["start_s"]
+    if start < 0.5 * g0["bar_s"]:
+        # 开头不到半小节（《逃跑的天使》第一个「1」在 0.125 s）：压成一小节，速度就到 1900 多 BPM（SynthV 的速度范围没核实过，
+        # 太大怕被截断、整首错位）→ 和下一小节并成第 1 小节（速度慢一点，这一段算自由段、不吸格线；前奏里没有人声）
+        notes.append(f"开头只有 {start:.3f} s（不到半小节）：并进下一小节，第 1 小节到 {start + g0['bar_s']:.3f} s")
+        start += g0["bar_s"]
     n_intro = max(1, round(start / g0["bar_s"]))
     anchors.append((n_intro, start))
     if start > 0.5 * g0["bar_s"]:
@@ -271,7 +276,9 @@ def selftest() -> list[str]:
 
 # ---------------------------------------------------------------- 主流程
 
-def main(cfg_path: str) -> int:
+def main(cfg_path: str, *flags: str) -> int:
+    """flags 里有 --reuse 且输出目录已有 tempo_map.json：速度走势、稳定的段、每段的速度 / 小节线、交界直接用上次的（这些最费时，
+    整首要二十来分钟），只重新组装速度表、重做按速度表的核对和节拍器试听 —— 改的只是组装速度表的规矩时用。"""
     fails = GC.selftest() + selftest()
     print("自检：", "通过（grid_check 那套 + 造的「自由前奏 + 82 BPM + 在小节线上换 86」认得出、速度表的拍和真拍差 ≤ 15 ms、"
                   "小节线差 60 ms 不许认成接上）" if not fails else "不通过")
@@ -285,19 +292,23 @@ def main(cfg_path: str) -> int:
     dur = len(acc) / SR
     harm, perc = librosa.effects.hpss(acc)
     curves = {"打击部分": GC.strength(perc, SR), "和声部分": GC.strength(harm, SR), "伴奏整条": GC.strength(acc, SR)}
-    feat = Features(harm, perc, SR)
-    center = cfg.get("bpm_center", 86.0)
-    w = walk(curves, dur, center * 0.7, center * 1.3)
-    runs = stable_runs(w)
+    prev_path = out / "tempo_map.json"
+    if "--reuse" in flags and prev_path.exists():
+        prev = json.loads(prev_path.read_text(encoding="utf-8"))
+        w, runs, grids, joins = [tuple(x) for x in prev["walk"]], prev["runs"], prev["sections"], prev["joins"]
+        print("（--reuse：速度走势、稳定的段、每段的速度和小节线、交界用上次的 tempo_map.json，只重新组装速度表、重做核对和试听）")
+    else:
+        feat = Features(harm, perc, SR)
+        center = cfg.get("bpm_center", 86.0)
+        w = walk(curves, dur, center * 0.7, center * 1.3)
+        runs = stable_runs(w)
+        grids = [extend(curves, section_grid(curves, feat, r["from_s"], r["to_s"], r["bpm"]), dur) for r in runs]
+        joins = [join(a, b) for a, b in zip(grids[:-1], grids[1:])]
     print("全曲速度走势（8 秒窗、每 2 秒）：" + " ".join(f"{x:.0f}:{b:.1f}" for x, b in w))
     print("稳定的段：" + "；".join(f"{r['from_s']:.0f}–{r['to_s']:.0f} s ≈ {r['bpm']:.2f}" for r in runs))
-    grids = []
-    for r in runs:
-        g = extend(curves, section_grid(curves, feat, r["from_s"], r["to_s"], r["bpm"]), dur)
-        grids.append(g)
-        print(f"  段 {len(grids)}：{g['bpm']:.3f} BPM，「1」模一小节 {g['one_mod_bar']:.4f} s（合分 {g['score']:.2f}，第二名 {g['second']:.2f}），"
+    for k, g in enumerate(grids, 1):
+        print(f"  段 {k}：{g['bpm']:.3f} BPM，「1」模一小节 {g['one_mod_bar']:.4f} s（合分 {g['score']:.2f}，第二名 {g['second']:.2f}），"
               f"按小节扩到 {g['start_s']:.3f}–{g['end_s']:.3f} s")
-    joins = [join(a, b) for a, b in zip(grids[:-1], grids[1:])]
     for i, j in enumerate(joins):
         print(f"  段 {i + 1} → 段 {i + 2}：最近的一对小节线 {j['a_s']:.3f} / {j['b_s']:.3f} s，差 {j['diff_ms']} ms → "
               f"{'在这条小节线上换速度' if j['joined'] else '接不上，中间算自由段'}")
@@ -343,4 +354,4 @@ def main(cfg_path: str) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(*sys.argv[1:]))
