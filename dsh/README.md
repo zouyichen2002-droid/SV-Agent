@@ -1,12 +1,12 @@
 # DSH 本机配置（副本）
 
 v3 阶段 0（2026-10-01）在这台机器上搭 DeepSeek Harness（DSH）用的补丁和启动脚本的**副本**，换机器或出问题时照着重搭。
-**DSH 实际读的是仓库外那几份** —— 改了那边要同步过来（阶段 1 挂我们自己的 bundle 时再理顺成一处）。为什么这么搭、测了什么，见 `docs/v3/s0-dsh.md`。
+**补丁和启动脚本：DSH 实际读的是仓库外那几份** —— 改了那边要同步过来；**插件源码只在这里**（`plugins/`，补丁直接用绝对路径指过来，本机没有 pnpm 所以不走 bundle 安装）。为什么这么搭、测了什么，见 `docs/v3/s0-dsh.md`、`s1-project.md`、`s2-artifact.md`。
 
 | 这里 | 实际在用的那份 | 是什么 |
 |---|---|---|
 | `profile-web.cordis.patch.yml` | `E:\sv-agent-data\dsh-home\profiles\web\cordis.patch.yml` | 我们的补丁层：模型 → 本地 llama；选目录 → 网页对话框；默认预设「SV 创作」（16 个工具，压缩按 16k 配）；挂我们自己的插件 |
-| `plugins/` | **只有这里一份**（补丁里用绝对路径直接指过来，不复制） | 我们自己写的 DSH 插件：`sv-project`（阶段 1：一首歌一个工作区，Agent 知道在做哪首歌）—— 见各自的 README |
+| `plugins/` | **只有这里一份**（补丁里用绝对路径直接指过来，不复制） | 我们自己写的 DSH 插件：`sv-project`（阶段 1：一首歌一个工作区，Agent 知道在做哪首歌）、`sv-artifact`（阶段 2：版本、交付后拦住覆盖、创作者改了自动备份）—— 见各自的 README |
 | `start-llama.sh` | `E:\sv-agent-data\dsh\start-llama.sh` | 本地模型服务：llama.cpp CUDA 版 + Qwen3.8-27B，要密钥、跨域只认本机、关 `/slots` |
 | `start-dsh-web.sh` | `E:\sv-agent-data\dsh\start-dsh-web.sh` | DSH 网页界面：只开本机、遥测关、权限预设 workspace-write |
 

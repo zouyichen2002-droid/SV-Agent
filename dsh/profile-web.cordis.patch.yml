@@ -107,11 +107,17 @@
 # SV-Agent 自己的插件（v3 阶段 1，10-01）：源码只在仓库 E:/sv-bridge/dsh/plugins/ 里（仓库是唯一来源，这里直接指过去）。
 # 本机没有 pnpm → 不走 dsh plugin add，用绝对路径挂成全局一行（插件只用 Node 自带模块，不 import DSH 的包）。
 # sv-project：一首歌 = 一个工作区（创作者 10-01 定）；每一步给模型一小段「当前项目」；工具 project_list / status / create / update
+# sv-artifact（阶段 2）：一版一个 rNN 文件夹；交付后 write / edit 不许碰；创作者改了自动拷到快照库（工作区外面，沙箱写不进去）—— 创作者 10-01「自动备份 + 拦住覆盖」
 - insert:
     - id: sv-project
       name: E:/sv-bridge/dsh/plugins/sv-project/index.js
       config:
         root: E:/sv-agent-workspace
+    - id: sv-artifact
+      name: E:/sv-bridge/dsh/plugins/sv-artifact/index.js
+      config:
+        root: E:/sv-agent-workspace
+        store: E:/sv-agent-data/snapshots
 # 选目录用网页里的浏览器（browse），不用原生对话框：本机 + Windows 时自动选 native，会在创作者桌面上弹 Windows 选文件夹窗口
 #（补丁不能改已有条目的插件名 → 关掉自动选择器、另插 browse 的两半：本机服务 + 网页界面；自动选择器原本就是挂这两条）
 - id: directory-picker

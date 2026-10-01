@@ -1,0 +1,9 @@
+{
+  "name": "@sv-agent/dsh-artifact",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SV-Agent 的 Artifact 插件：每首歌一版一个 rNN 文件夹；交付后不许覆盖，创作者改了自动备份到快照库",
+  "exports": { ".": "./index.js" },
+  "scripts": { "test": "node test.mjs" }
+}
