@@ -327,7 +327,11 @@ def main(cfg_path: str) -> int:
         before_lyr = after_lyr = {"说明": "没给歌词：只用听写出来的字（拼音），不修"}
         print(f"扒出 {len(notes0)} 个音；没给歌词 —— 字用听写出来的，不修")
 
-    picked, new, why, other = P.pick(fixed, cfg["vocal_stem"], cfg["bp_raw"])
+    if cfg.get("octave_pick", True):
+        picked, new, why, other = P.pick(fixed, cfg["vocal_stem"], cfg["bp_raw"])
+    else:                                                        # 10-01 晚：对照用 —— 不挑八度，音高全照 Vocal2Midi（六首里挑八度 126 个只改对 1 个）
+        picked, why, other = list(fixed), ["原样（这一版不挑八度）"] * len(fixed), [False] * len(fixed)
+        new = [int(round(c / 100)) for _, _, c, _ in fixed]
     ps = [int(round(c / 100)) for _, _, c, _ in fixed]
     changed = [k for k in range(len(fixed)) if new[k] != ps[k]]
     doubled = sum(1 for o in other if o)
