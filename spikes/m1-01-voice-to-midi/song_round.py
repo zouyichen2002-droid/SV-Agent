@@ -128,16 +128,23 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
                 t["mainRef"]["audio"]["filename"] = str(cfg["accomp"]).replace("\\", "/")
                 if cfg.get("accomp_name"):
                     t["name"] = cfg["accomp_name"]
+                t["mainRef"]["mute"] = t.setdefault("mixer", {})["mute"] = False
             else:
                 # 伴奏以外的音频轨都当参考人声：改名、静音；配置里给了 ref_vocal_audio（比如新分出来的主唱）就换成它
                 if cfg.get("ref_vocal_audio"):
                     t["mainRef"]["audio"]["filename"] = str(cfg["ref_vocal_audio"]).replace("\\", "/")
-                t["name"], t["mainRef"]["mute"] = cfg.get("ref_vocal_name", "原唱人声（参考，静音）"), True
+                t["name"] = cfg.get("ref_vocal_name", "原唱人声（参考，静音）")
+                t["mainRef"]["mute"] = t.setdefault("mixer", {})["mute"] = True
         else:
-            t["name"], t["mainRef"]["mute"] = f"对照：{t.get('name')}（模板里原来的，静音）", True
+            t["name"] = f"对照：{t.get('name')}（模板里原来的，静音）"
+            t["mainRef"]["mute"] = t.setdefault("mixer", {})["mute"] = True
+    # 静音有两处：mainRef.mute 和混音台的 mixer.mute（SynthV 轨头上那个 M）。两处都设 ——
+    # 《潮声回响》r01–r05 只设了前一处，扒谱那条从模板人声轨继承了混音台静音，打开时听不到
+    for t in d["tracks"]:
+        t["mixer"]["solo"] = False
     ours = copy.deepcopy(tmpl)
     ours["name"] = track_name
-    ours["mainRef"]["mute"] = False
+    ours["mainRef"]["mute"] = ours["mixer"]["mute"] = False
     ours["mainRef"]["uuid"] = str(uuid.uuid4())
     ours["mainGroup"] = {**copy.deepcopy(tmpl["mainGroup"]), "uuid": str(uuid.uuid4()), "notes": [], "pitchControls": []}
     ours["mainRef"]["groupID"] = ours["mainGroup"]["uuid"]
@@ -157,6 +164,10 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
                       "takes": {"activeTakeId": 0, "takes": [{"id": 0, "seedDuration": 0, "seedPitch": 0, "seedTimbre": 0,
                                                               "liked": False}]}})
     ours["mainGroup"]["notes"] = notes
+    # 模板里一个音都没有的音符轨（make_template.py 做的模板：那条人声轨只用来带声库设置）不留，免得多一条空的「对照」
+    lib = {g["uuid"]: g for g in d.get("library", [])}
+    d["tracks"] = [t for t in d["tracks"] if t["mainRef"].get("audio") or t["mainGroup"].get("notes")
+                   or any((lib.get(r.get("groupID")) or {}).get("notes") for r in t.get("groups", []))]
     d["tracks"].append(ours)
     for i, t in enumerate(d["tracks"]):
         t["dispOrder"] = i
@@ -196,10 +207,16 @@ def check(path: pathlib.Path, cfg: dict, tempo: list[dict], rows: list[dict], tr
     a1 = RT.timeline(d)["audio"]
     if sorted(round(v, 6) for v in a0.values()) != sorted(round(v, 6) for v in a1.values()):
         fails.append("音频位置变了")
+    plays = lambda t: not t["mainRef"].get("mute") and not t.get("mixer", {}).get("mute")     # noqa: E731  两处静音都没开才算在放
     audio = [t for t in d["tracks"] if t["mainRef"].get("audio")]
-    playing = [t["mainRef"]["audio"]["filename"] for t in audio if not t["mainRef"].get("mute")]
+    playing = [t["mainRef"]["audio"]["filename"] for t in audio if plays(t)]
     if playing != [str(cfg["accomp"]).replace("\\", "/")]:
-        fails.append(f"没静音的音频轨应该只有给的伴奏，实际是 {playing}")
+        fails.append(f"在放的音频轨应该只有给的伴奏，实际是 {playing}")
+    singing = [t.get("name") for t in d["tracks"] if not t["mainRef"].get("audio") and plays(t)]
+    if singing != [track_name]:
+        fails.append(f"在放的音符轨应该只有「{track_name}」，实际是 {singing}")
+    if any(t.get("mixer", {}).get("solo") for t in d["tracks"]):
+        fails.append("有轨开着独奏")
     for t in audio:
         if not pathlib.Path(t["mainRef"]["audio"]["filename"]).exists():
             fails.append(f"音频文件不存在：{t['mainRef']['audio']['filename']}")
@@ -225,22 +242,27 @@ def main(cfg_path: str) -> int:
         return 1
     notes0, n_frag = merge_fragments(sorted(E.load(cfg["v2m_mid"])))
     print(f"GAME 的碎片（短于 {FRAG * 1000:.0f} ms、紧贴同音高）并掉 {n_frag} 个")
-    chars, pys = E.text_pinyin(cfg["lyrics"])
-    fails = RL.selftest(chars, pys)
-    if fails:
-        print("修歌词的自检不过：", fails)
-        return 1
-    fixed, log = RL.repair(notes0, chars, pys)
-    acts = {}
-    for x in log:
-        acts[x["动作"]] = acts.get(x["动作"], 0) + 1
-    before_lyr, after_lyr = E.evaluate(notes0, cfg["lyrics"]), E.evaluate(fixed, cfg["lyrics"])
-    for dct in (before_lyr, after_lyr):                          # evaluate 顺手拿《傍晚》的终稿比 —— 对别的歌没意义
-        dct.pop("对终稿", None)
-    diff = RL.sung_differently(notes0, chars, pys, log)
-    print(f"扒出 {len(notes0)} 个音；歌词 {len(chars)} 个字。修歌词：{acts}")
-    print(f"  歌词对得上的：听写 {before_lyr} → 修完 {after_lyr}")
-    print(f"  听写和歌词明显不一样的 {len(diff)} 处（照歌词放了）")
+    if cfg.get("lyrics"):
+        chars, pys = E.text_pinyin(cfg["lyrics"])
+        fails = RL.selftest(chars, pys)
+        if fails:
+            print("修歌词的自检不过：", fails)
+            return 1
+        fixed, log = RL.repair(notes0, chars, pys)
+        acts = {}
+        for x in log:
+            acts[x["动作"]] = acts.get(x["动作"], 0) + 1
+        before_lyr, after_lyr = E.evaluate(notes0, cfg["lyrics"]), E.evaluate(fixed, cfg["lyrics"])
+        for dct in (before_lyr, after_lyr):                      # evaluate 顺手拿《傍晚》的终稿比 —— 对别的歌没意义
+            dct.pop("对终稿", None)
+        diff = RL.sung_differently(notes0, chars, pys, log)
+        print(f"扒出 {len(notes0)} 个音；歌词 {len(chars)} 个字。修歌词：{acts}")
+        print(f"  歌词对得上的：听写 {before_lyr} → 修完 {after_lyr}")
+        print(f"  听写和歌词明显不一样的 {len(diff)} 处（照歌词放了）")
+    else:                                                        # 没给歌词：字就用听写出来的（拼音），不修
+        chars, fixed, log, acts, diff = [], list(notes0), [], {}, []
+        before_lyr = after_lyr = {"说明": "没给歌词：只用听写出来的字（拼音），不修"}
+        print(f"扒出 {len(notes0)} 个音；没给歌词 —— 字用听写出来的，不修")
 
     picked, new, why, other = P.pick(fixed, cfg["vocal_stem"], cfg["bp_raw"])
     ps = [int(round(c / 100)) for _, _, c, _ in fixed]
