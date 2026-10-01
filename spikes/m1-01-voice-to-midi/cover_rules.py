@@ -19,6 +19,13 @@
    念唱就把离主音 1 个半音的（GAME 把同一个念唱音扒抖了）拉回主音，离得远的那几个照留；拖音跟着前一个字，句首的归主音。
    两个音交替的（《刽子手》齐唱第 1 遍 A4 / G4 各一半，pyin 量出来两个音都是真的）不算念唱、不动。
 
+4.「下一句的第一个字跑到上一句末尾了」（创作者 09-30 指出 r04 的 2:02、2:27 两处）：上一句末字被 GAME 切成两段、下一句第一个字 GAME 又没扒到音，
+   对齐时就把它塞进了上一句末尾那段。认法：一行的第一个字落在「紧贴上一句、后面紧跟着一段空档（≥ 0.35 秒）」的音上，而这行第二个字在空档后面。
+   改法：那个音还给上一句（同音高写上一句末字的韵母，不然写「-」）；这个字放到空档里、紧挨着下一句第一个音之前**补一个音**
+   （长一拍，空档不够就半拍，再不够就不放、列出来）—— 照创作者改 r02 的做法（1:10.78、2:04.78、2:28.56 三处都是在空档里补一个 0.23–0.46 秒的音，
+   下一个音不动）；**音高照下一个音写，列出来要他听**（录音里那段是前一个音的余音 / 和声 / 滑音，量不出这个字的音高；他放的是同音或低一个全音）。
+   先试过「把下一个音对半拆开、前一半给它」（r05，弃用）：把本来对的「gen」「yi」挤晚了半拍。
+
 只动音高和字、并 / 截音，不动起音（吸格线在后面）。每条都列改了哪些音。
 """
 from __future__ import annotations
@@ -30,6 +37,7 @@ LINE_MIN_MATCH = 0.25
 LONG_SPLIT_SEC = 3.0
 CONTIG = 0.03
 CHANT_GAP, CHANT_MIN_NOTES, CHANT_SYLLABIC, CHANT_MAX_BEATS = 0.25, 6, 0.7, 0.6
+REST_SEC = 0.35
 INITIALS = ("zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "r", "z", "c", "s", "y", "w")
 fmt = lambda s: f"{int(s // 60)}:{s % 60:05.2f}"                                   # noqa: E731
 
@@ -153,8 +161,95 @@ def chant(notes: list[tuple], beat_sec) -> tuple[list[tuple], list[str]]:
     return out, log
 
 
+# ---------- 4. 下一句的第一个字跑到上一句末尾 ----------
+def map_chars(notes: list[tuple], pys: list[str]) -> dict[int, int]:
+    """每个带字的音是歌词里第几个字（按拼音求最长公共子序列；修歌词放的字和歌词同序）。"""
+    idx = [k for k, n in enumerate(notes) if n[3] not in ("-", "")]
+    a = [notes[k][3] for k in idx]
+    n, m = len(a), len(pys)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            dp[i][j] = dp[i + 1][j + 1] + 1 if a[i] == pys[j] else max(dp[i + 1][j], dp[i][j + 1])
+    out, i, j = {}, 0, 0
+    while i < n and j < m:
+        if a[i] == pys[j]:
+            out[idx[i]] = j
+            i += 1
+            j += 1
+        elif dp[i + 1][j] >= dp[i][j + 1]:
+            i += 1
+        else:
+            j += 1
+    return out
+
+
+def fix_line_starts(notes: list[tuple], line_lens: list[int], pys: list[str], beat_sec=lambda s: 0.5
+                    ) -> tuple[list[tuple], list[str], list[str]]:
+    """→ (新的音, 改了什么, 要你听 / 手放的)。line_lens：放进主唱的每行字数（和 pys 同序）；beat_sec(秒) → 那一刻一拍多少秒。"""
+    notes = [list(n) for n in sorted(notes)]
+    note_of = {c: k for k, c in map_chars([tuple(n) for n in notes], pys).items()}
+    gap = lambda a, b: notes[b][0] - (notes[a][0] + notes[a][1])                    # noqa: E731
+    starts, s = [], 0
+    for ln in line_lens[:-1]:
+        s += ln
+        starts.append(s)
+    log, hand, splits = [], [], []
+    for b in starts:
+        jp, jb, jn = note_of.get(b - 1), note_of.get(b), note_of.get(b + 1)
+        if jp is None or jb is None or jn is None or not (jp < jb < jn) or jb + 1 >= len(notes):
+            continue
+        if gap(jb - 1, jb) >= REST_SEC or gap(jb, jb + 1) < REST_SEC:
+            continue
+        prev = notes[jp][3]
+        v = vowel_of(prev)
+        same = int(round(notes[jb][2] / 100)) == int(round(notes[jb - 1][2] / 100))
+        moved = notes[jb][3]
+        notes[jb][3] = v if (same and v) else "-"
+        k1 = jb + 1
+        room = gap(jb, k1) - 0.05
+        bt = beat_sec(notes[k1][0])
+        dur = bt if room >= bt else (bt / 2 if room >= bt / 2 else None)
+        head = f"{fmt(notes[jb][0])}「{moved}」是下一句的第一个字，跑到了上一句末尾 → 那个音还给「{prev}」写「{notes[jb][3]}」；"
+        if dur is not None and k1 == jn:
+            splits.append((k1, moved, dur))
+            log.append(head + f"「{moved}」在 {fmt(notes[k1][0] - dur)} 补一个音（{'一拍' if dur == bt else '半拍'}、音高照下一个音）")
+            hand.append(f"{fmt(notes[k1][0] - dur)}「{moved}」是补的音，音高照下一个音写的，要你听")
+        else:
+            log.append(head + f"「{moved}」不放（空档不够补一个音）")
+            hand.append(f"{fmt(notes[k1][0])} 前面：下一句的第一个字「{moved}」没放（空档不够），要你手放")
+    for k1, ly, dur in sorted(splits, reverse=True):
+        st, d, c, _ = notes[k1]
+        notes.insert(k1, [st - dur, dur, c, ly])
+    return [tuple(n) for n in notes], log, hand
+
+
 def selftest() -> list[str]:
     fails = []
+    # 4. 下一句的第一个字跑到上一句末尾
+    base = [(0.0, 0.4, 6000.0, "da"), (0.4, 0.4, 6200.0, "di"), (0.8, 0.4, 6200.0, "pa"),
+            (2.2, 0.8, 6400.0, "qi"), (3.0, 0.4, 6500.0, "ri")]
+    beat = lambda s: 0.4615                                                       # noqa: E731
+    got, _, hand = fix_line_starts(base, [2, 3], ["da", "di", "pa", "qi", "ri"], beat)
+    if ([g[3] for g in got] != ["da", "di", "i", "pa", "qi", "ri"] or abs(got[3][0] - (2.2 - 0.4615)) > 1e-9
+            or got[3][2] != 6400.0 or got[4] != (2.2, 0.8, 6400.0, "qi") or len(hand) != 1):
+        fails.append(f"句首的字跑到上一句末尾没改对（该在空档里补一拍、下一个音不动）：{got}")
+    tight = base[:3] + [(1.6, 0.8, 6400.0, "qi"), (2.4, 0.4, 6500.0, "ri")]       # 空档 0.4 秒：只够补半拍
+    got, _, _ = fix_line_starts(tight, [2, 3], ["da", "di", "pa", "qi", "ri"], beat)
+    if [g[3] for g in got] != ["da", "di", "i", "pa", "qi", "ri"] or abs(got[3][1] - 0.4615 / 2) > 1e-9:
+        fails.append(f"空档不够一拍时该补半拍：{got}")
+    slow = lambda s: 0.73                                                         # noqa: E731  82 BPM：空档 0.4 秒连半拍都不够
+    got, _, hand = fix_line_starts(tight, [2, 3], ["da", "di", "pa", "qi", "ri"], slow)
+    if [g[3] for g in got] != ["da", "di", "i", "qi", "ri"] or len(hand) != 1:
+        fails.append(f"空档不够半拍时应该不放、列出来：{got} {hand}")
+    ok = [(0.0, 0.4, 6000.0, "da"), (0.4, 0.4, 6200.0, "di"), (2.2, 0.4, 6400.0, "pa"), (2.6, 0.4, 6400.0, "qi"), (3.0, 0.4, 6500.0, "ri")]
+    got, log, _ = fix_line_starts(ok, [2, 3], ["da", "di", "pa", "qi", "ri"])
+    if log or [g[3] for g in got] != ["da", "di", "pa", "qi", "ri"]:
+        fails.append(f"本来就对的被改了：{log}")
+    diff_p = base[:2] + [(0.8, 0.4, 6000.0, "pa")] + base[3:]
+    got, _, _ = fix_line_starts(diff_p, [2, 3], ["da", "di", "pa", "qi", "ri"])
+    if got[2][3] != "-":
+        fails.append(f"音高不同的那段应该写「-」：{got[2]}")
     # 1. 行
     if drop_unsung(["ab", "cd", "ef"], [1.0, 0.1, 0.5]) != ([0, 2], [1]):
         fails.append("对不上的行没拿对")

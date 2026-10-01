@@ -254,6 +254,7 @@ def main(cfg_path: str) -> int:
     notes0, n_frag = merge_fragments(sorted(E.load(cfg["v2m_mid"])))
     print(f"GAME 的碎片（短于 {FRAG * 1000:.0f} ms、紧贴同音高）并掉 {n_frag} 个")
     rule_log: dict[str, list] = {}
+    kept_lens: list[int] | None = None                           # 放进主唱的每行字数（新规矩 4 用）
     if cfg.get("lyrics"):
         chars, pys = E.text_pinyin(cfg["lyrics"])
         fails = RL.selftest(chars, pys)
@@ -273,6 +274,7 @@ def main(cfg_path: str) -> int:
             chars = [ch for li in keep for ch in chars[starts[li]:starts[li + 1]]]
             pys = [p for li in keep for p in pys[starts[li]:starts[li + 1]]]
             rule_log["拿掉的行"] = [{"行": li + 1, "字数": len(lines[li]), "对上": round(rates[li], 2)} for li in drop]
+            kept_lens = [len(lines[li]) for li in keep]
             rnd_dir.mkdir(parents=True, exist_ok=True)
             lyr_used = rnd_dir / "歌词_放进主唱的行.txt"
             lyr_used.write_text("\n".join(lines[li] for li in keep) + "\n", encoding="utf-8")
@@ -300,6 +302,11 @@ def main(cfg_path: str) -> int:
     doubled = sum(1 for o in other if o)
     print(f"挑八度：录音里两个八度一起唱的音 {doubled} 个，改了八度的 {len(changed)} 个")
     if cfg.get("rules_0930"):                                    # 09-30 新规矩 2、3：同音高的接续（长音截两段写韵母）、念唱拉平
+        if int(cfg["rules_0930"]) >= 2 and kept_lens:            # 新规矩 4（09-30 晚）：下一句的第一个字跑到上一句末尾
+            picked, rule_log["下一句的第一个字跑到上一句末尾"], rule_log["要你手放的字"] = CR.fix_line_starts(
+                picked, kept_lens, pys, lambda s: 60.0 / bpm_at(tempo, s))
+            key = "下一句的第一个字跑到上一句末尾"
+            print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
         picked, rule_log["同音高的接续"] = CR.same_pitch(picked)
         picked, rule_log["念唱"] = CR.chant(picked, lambda s: 60.0 / bpm_at(tempo, s))
         for k in ("同音高的接续", "念唱"):
