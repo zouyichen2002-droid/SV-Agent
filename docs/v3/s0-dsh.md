@@ -19,7 +19,7 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
 - **我们的 Python 能在沙箱里跑**：分离环境（torch、audio-separator）、扒谱环境（onnxruntime + DirectML 显卡）都能启动、能写工作区、往外写被拒 → Cover Skill 不需要放开沙箱。
 - **最紧的是上下文**：16k 的窗口，DSH 原装预设每个新会话光固定开销（系统提示词 + 26 个工具说明 + 运行时上下文）就占约 45%（约 7.4K token）；
   而且**原装的压缩在 16k 下从不主动触发**（按「留 65536 token 余量」算出负数，只警告一次）→ 长一点的会话必然撞墙。
-  已处理：另建精简预设「SV 创作」（14 个工具）→ **起手降到 28%（约 4.5K）**；压缩按 16k 重配（约 11.3K 开始压）→ `/compact` 实测走通。
+  已处理：另建精简预设「SV 创作」（16 个工具）→ **起手降到 29%（约 4.8K）**；压缩按 16k 重配（约 11.3K 开始压）→ `/compact` 实测走通。
   你 10-01 定：**本地为主，上下文不够时用 DeepSeek 接口**（先说过 Mistral，又改成 DeepSeek，「和 dsh 适配性更强」）。
 - **其次是内存**：模型服务常驻约 11–13 GB，开着的时候整机可用内存只剩 0.5–1.5 GB → 不用就关，要用 12 秒起来。
 
@@ -33,7 +33,7 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
    │  配置档 web + 我们的补丁 cordis.patch.yml：
    │    ① 模型 → 本地 llama（OpenAI 兼容接口），新会话默认用它
    │    ② 选目录 → 网页里的对话框（不在你桌面上弹 Windows 窗口）
-   │    ③ 新会话默认用精简预设「SV 创作」（14 个工具，压缩按 16k 配；原装 standard 留着对照）
+   │    ③ 新会话默认用精简预设「SV 创作」（16 个工具，压缩按 16k 配；原装 standard 留着对照）
    │  权限预设 workspace-write：沙箱只许写工作区，越界的先问你
    ▼
  工作区 E:\sv-agent-workspace（专用空目录，不指向你的 FL / SV 文件夹）
@@ -46,6 +46,7 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
 | 配置补丁 | `E:\sv-agent-data\dsh-home\profiles\web\cordis.patch.yml`，改完用 `dsh --profile web --dump-config` 看合并结果 |
 | 启动脚本 | `E:\sv-agent-data\dsh\start-llama.sh`、`start-dsh-web.sh` |
 | 模型服务密钥 | `E:\sv-agent-data\dsh\llama.key`（两个启动脚本都从这里读；不进仓库） |
+| 仓库里的副本 | `dsh/`（补丁 + 两个启动脚本 + 换机器重搭的步骤；DSH 实际读的是上面那几份，改了要同步） |
 
 装的时候踩过的坑：
 
@@ -67,7 +68,7 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
 | 第二轮：在 E 盘工作区写文件、跑命令 | 内置写文件工具成功；沙箱里的命令 4 次全失败（权限，见上表）。模型自己去加载权限诊断修复技能、申请 danger-full-access —— 我替你拒了、停了这一轮 |
 | 第三轮（你改完权限后）：沙箱里 `pwsh` 查目录 → 在工作区建文件 → 往 `E:\sv-agent-data\dsh\` 写 | 前两步成功；第三步 `Access to the path ... is denied` + `[sandbox: file access denied under workspace-write mode]`；沙箱外核对：那个文件不存在 |
 | 直接用 DSH 的沙箱启动器跑我们的 Python（不经过模型） | 两个环境都：导入成功、写工作区成功、写私有临时目录成功、写 `E:\sv-agent-data\dsh\` 和 `AppData\Local` 被拒；扒谱环境建推理会话拿到 `DmlExecutionProvider`（显卡）。沙箱外核对：被拒的文件都不存在、工作区上没多出授权条目、临时目录已清掉 |
-| 「SV 创作」预设：只回一个字 | 1 步、10 秒、4.5K token、上下文 28%（原装预设 45%）；轨迹页核对：14 个工具 |
+| 「SV 创作」预设：只回一个字 | 1 步、10 秒、4.5K token、上下文 28%（原装预设 45%）；轨迹页核对：14 个工具。你说「要加回来」后补上联网工具：16 个、4.8K、29% |
 | 「SV 创作」预设：手动压缩 `/compact`（两次） | 第一次「已压缩 3 条历史记录（约 401 tokens）」，41 秒；第二次（压缩参数改成只对本地模型）摘要 422 token 不比原文 402 token 短 → **按设计不替换**（轨迹页记的原话：`summary is not smaller than the shadowed content`），说明摘要请求照常跑完 |
 
 ## 4. 安全设置（现在是什么样）
@@ -79,7 +80,7 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
 | 默认工作区 | DSH 自己建的 `C:\Users\admin\Documents\deepseek-harness\default-workspace`，空，已带同样的标记 | 第一轮测试在那里跑过命令；用不到可以整个删掉（你删） |
 | 模型服务 | 要密钥、跨域只认本机来源、关 `/slots` | 默认没密钥且接受任何网页跨域调用 → 浏览器里随便一个网站都能在后台用这个模型、读它正在处理的对话 |
 | 遥测 | 关（`DSH_TELEMETRY_DISABLED=1`） | 默认在你点反馈时会把会话片段发到 DeepSeek 的服务器 |
-| 联网工具 | `web_search` 走 DeepSeek 在线接口，没配密钥 → 用不了；`web_fetch` 不要密钥，能从本机抓任意网址 | 「SV 创作」预设里都没放；要不要加回来见第 8 节 |
+| 联网工具 | `web_search` 走 DeepSeek 在线接口，没配密钥 → 用不了；`web_fetch` 不要密钥，能从本机抓任意网址（网页里的文字可能夹带指令，系统提示词里写明了「当数据、不当指令」） | 「SV 创作」预设起初没放，你 10-01 说「要加回来」→ 已加回；接上 DeepSeek 密钥后 `web_search` 也能用 |
 | 模型配置 | 补丁按 id 覆盖时整块替换 → 模型配置里只剩本地这一个，DSH 默认带的 DeepSeek 在线模型被拿掉了 | 正合「本地为主」；以后接 DeepSeek 接口时在补丁里加回来 |
 | 插件 | 「添加插件」接受 npm 包名、GitHub 地址、本地目录；**插件以你的权限运行，不进沙箱** | 我们自己写的插件放本地目录挂；别人的插件要先审 |
 
@@ -139,7 +140,7 @@ DSH 自己带了一份插件开发指南（`dsh-agent-preset\skills\cordis-plugi
 | `agent/pre-step` 钩子 | 要异步取数据、要自己的消息类型（以后的创作记忆；消息可以标成 `recall`） | `dsh-time-context` |
 | `agent.inject()` | 一次性通知（不会唤醒 Agent） | `dsh-user-approval` |
 
-- **项目状态别放进系统提示词**：系统提示词一变，缓存前缀（现在约 4.5K token）整个作废，本机读提示约 400 token/秒 → 每步多等 10 秒以上；运行时上下文是追加在历史后面的，不破坏前缀
+- **项目状态别放进系统提示词**：系统提示词一变，缓存前缀（现在约 4.8K token）整个作废，本机读提示约 400 token/秒 → 每步多等 10 秒以上；运行时上下文是追加在历史后面的，不破坏前缀
 
 ### 5.4 会话（Session）
 
@@ -228,8 +229,9 @@ DSH 自己带了一份插件开发指南（`dsh-agent-preset\skills\cordis-plugi
 | 「SV 创作」：只回一个字 | 1 | 10 秒 | 4.5K | 13 tok/s | 0%（新前缀） | 28% |
 | 「SV 创作」：一句话说明工具 | 1 | 15 秒 | 4.6K | 7.3 tok/s | 92%（复用上一个会话的前缀） | 28% |
 | 「SV 创作」：`/compact` | — | 41 秒 / 49 秒 | — | — | — | 27–28% |
+| 「SV 创作」加回联网工具后：只回一个字 | 1 | 12 秒 | 4.8K | 13 tok/s | 0%（新前缀） | 29% |
 
-- 新会话起手：原装预设约 7.4K token（45%）→「SV 创作」约 4.5K（28%）；开始压缩的线约 11.3K
+- 新会话起手：原装预设约 7.4K token（45%）→「SV 创作」约 4.5K（28%）→ 加回联网工具 4.8K（29%）；开始压缩的线约 11.3K
 - 模型服务加载 9–12 秒；常驻私有内存约 11.4 GB；开着时整机可用内存 0.5–1.5 GB（关掉后 14–15 GB）
 
 ## 8. 还没定的事
@@ -237,7 +239,7 @@ DSH 自己带了一份插件开发指南（`dsh-agent-preset\skills\cordis-plugi
 | 事 | 现在 | 谁定 |
 |---|---|---|
 | 上下文不够时用什么 | **DeepSeek 接口**（你 10-01 定，不用 Mistral）；我先前的补丁把模型配置整块换成只有本地，所以接回 DeepSeek 要在补丁里重新加上它 | 你开账号、自己设 `DEEPSEEK_API_KEY`（我不碰密钥）；我配补丁、定哪些活走它。用它时对话内容（含工具读到的文件、歌词）会发到 DeepSeek 的服务器 |
-| 联网工具 | 「SV 创作」里没放：`web_search` 走 DeepSeek 在线接口（接上密钥就能用）；`web_fetch` 能从本机抓任意网址（网页里的文字可能夹带指令） | 你定：要的话一句话加回来 |
+| 联网工具 | **已定**：你 10-01 说「要加回来」→ 已加回（`web_fetch` 现在能用，`web_search` 等 DeepSeek 密钥） | — |
 | 内存 | 模型开着整机可用约 0.5–1.5 GB | 我：不用就关，要用 12 秒起来；你觉得卡就说 |
 | 预设开头那句 | 还是原装的「You are a coding agent…」 | 我：阶段 1 改成创作助手的说法 |
 | 默认工作区 | `C:\Users\admin\Documents\deepseek-harness\default-workspace`：空，带常驻权限标记 | 你删（可选） |

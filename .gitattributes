@@ -3,3 +3,5 @@
 # 2026-09-27 对照实测：本机 Git 自带的 sh 碰到 CRLF 照样能跑、照样能拦；
 # 别的 sh 不一定（CR 会被读进命令参数）。这一行是换机器时的保险，不是修本机的故障。
 .githooks/* text eol=lf
+# DSH 的启动脚本（10-01，dsh/）同理：bash 脚本固定 LF
+dsh/*.sh text eol=lf

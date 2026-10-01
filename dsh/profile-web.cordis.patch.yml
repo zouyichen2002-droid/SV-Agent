@@ -1,0 +1,119 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+#
+# SV-Agent（10-01）：全部本地 —— 本地 llama.cpp（127.0.0.1:8081，见 E:/sv-agent-data/dsh/start-llama.sh）当模型，新会话默认用它。
+# 权限照默认：workspace-write（沙箱只许写工作区）+ 要审批的先问（启动脚本里 DSH_PERMISSION_MODE=workspace-write）。
+# LOCAL_LLAMA_KEY 是本地模型服务的密钥（10-01 起要密钥；启动脚本从 E:/sv-agent-data/dsh/llama.key 读，别写进这里）。
+- id: llm-pi-ai
+  config:
+    providers:
+      local-llama:
+        apiKeyEnv: LOCAL_LLAMA_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:8081/v1
+        compat:
+          supportsDeveloperRole: false
+          maxTokensField: max_tokens
+        models:
+          - id: qwen3.8-27b
+            input: [ text ]
+            contextWindow: 16384
+            maxTokens: 4096        # 10-01：每次请求的输出上限（也是压缩算账时的输出预留）；最长的回复（中文总结、写一份技能说明）1–3K
+- id: agent-default-model
+  config:
+    provider: local-llama
+    model: qwen3.8-27b
+# SV 创作预设（10-01）：从 standard 预设（@deepseek-ai/dsh-web-app 的 presets/standard.patch.yml）抄出来、只留用得到的，standard 原样留着对照。
+# 为什么另建：预设里的子行不能用补丁按 id 改（补丁只往 group 里找），改 standard 就得整份重抄；另建一个更干净，阶段 1 的 Project 插件也挂这里。
+# 去掉的：子 Agent / workflow（PRD §0.4「先不做多 Agent」）、长期目标三件套、计划模式（联网工具起初也去掉了，创作者 10-01 说「要加回来」→ 已加回）
+#   → 新会话起手的固定开销从约 7.4K token（16k 的 45%）降下来，实测数字记在 sv-bridge/docs/v3/s0-dsh.md
+# 压缩：默认按「留 65536 token 余量」算，16k 窗口下是负数 → 只警告一次、从不主动压缩（compaction-basic lib/index.js）；这里按 16k 重配
+- insert:
+    - id: preset-sv
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: sv
+        name: SV 创作
+        description: 本地模型（16k）用的精简预设：文件、PowerShell、后台任务、技能、交付；压缩按 16k 配
+        order: 0
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: Your working directory is {{cwd}}.
+              prefix: You are a coding agent powered by the {{model}} model.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  modelPolicies:             # 只改本地 16k 模型；以后接 DeepSeek 接口（创作者 10-01 定）的大窗口模型走默认
+                    - provider: local-llama
+                      model: qwen3.8-27b
+                      headroomTokens: 1024   # 触发线 = floor(min(16384×0.8, 16384−4096−1024)) = 11264；最近 16% 原样留（约 1966）
+                      maxTokens: 1024        # 摘要的输出上限（默认跟 headroomTokens 走）；10-01 /compact 实测 41 秒走通
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 4096     # standard 是 8192 / 4096 / 1024；16k 窗口减半
+                  headChars: 2048
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web               # 创作者 10-01「要加回来」；web_search 要 DEEPSEEK_API_KEY 才能用（他之后开），web_fetch 现在就能用
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+- id: agent-preset-registry
+  config:
+    default: sv
+# 选目录用网页里的浏览器（browse），不用原生对话框：本机 + Windows 时自动选 native，会在创作者桌面上弹 Windows 选文件夹窗口
+#（补丁不能改已有条目的插件名 → 关掉自动选择器、另插 browse 的两半：本机服务 + 网页界面；自动选择器原本就是挂这两条）
+- id: directory-picker
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: directory-picker-browse-ui
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
