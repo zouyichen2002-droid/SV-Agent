@@ -308,7 +308,8 @@ def main(cfg_path: str) -> int:
             key = "下一句的第一个字跑到上一句末尾"
             print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
         picked, rule_log["同音高的接续"] = CR.same_pitch(picked)
-        picked, rule_log["念唱"] = CR.chant(picked, lambda s: 60.0 / bpm_at(tempo, s))
+        picked, rule_log["念唱"] = CR.chant(picked, lambda s: 60.0 / bpm_at(tempo, s),
+                                           all_one=int(cfg["rules_0930"]) >= 3)    # ≥ 3：认出来的念唱全部用一个音（09-30 晚）
         for k in ("同音高的接续", "念唱"):
             print(f"{k}：{len(rule_log[k])} 处" + "".join(f"\n    {x}" for x in rule_log[k]))
 

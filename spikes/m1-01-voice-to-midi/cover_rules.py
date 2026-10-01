@@ -18,6 +18,10 @@
    （一样多取离中位近的、再一样取高的）；离主音 ≥ 2 个半音的算「不一样的」，每 8 个音最多 2 个才算念唱 ——
    念唱就把离主音 1 个半音的（GAME 把同一个念唱音扒抖了）拉回主音，离得远的那几个照留；拖音跟着前一个字，句首的归主音。
    两个音交替的（《刽子手》齐唱第 1 遍 A4 / G4 各一半，pyin 量出来两个音都是真的）不算念唱、不动。
+   **09-30 晚创作者改了**：「如果识别为念唱（保守识别），就全部用一个音，然后让创作者自己调」—— 认法不变（上面这些条件都要满足才算），
+   认出来的整句（连拖音）全部用主音、去掉音分微调（song_round 里 rules_0930 ≥ 3）。《傍晚》终稿和基线上照样一个音都不认。
+   全部用一个音改得更狠，所以认得更保守：还要带字的音里至少 2 个、至少 1/4 是在主音上下一个半音之间抖的（念唱音不稳、GAME 扒抖了）——
+   第一次没加这条（r07，弃用），把主歌里 6 句稳稳唱在 G3 上、只有一两个真不一样的也拉平了。
 
 4.「下一句的第一个字跑到上一句末尾了」（创作者 09-30 指出 r04 的 2:02、2:27 两处）：上一句末字被 GAME 切成两段、下一句第一个字 GAME 又没扒到音，
    对齐时就把它塞进了上一句末尾那段。认法：一行的第一个字落在「紧贴上一句、后面紧跟着一段空档（≥ 0.35 秒）」的音上，而这行第二个字在空档后面。
@@ -40,6 +44,8 @@ CHANT_GAP, CHANT_MIN_NOTES, CHANT_SYLLABIC, CHANT_MAX_BEATS = 0.25, 6, 0.7, 0.6
 REST_SEC = 0.35
 INITIALS = ("zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "r", "z", "c", "s", "y", "w")
 fmt = lambda s: f"{int(s // 60)}:{s % 60:05.2f}"                                   # noqa: E731
+_NAMES = "C C# D D# E F F# G G# A A# B".split()
+name = lambda p: f"{_NAMES[p % 12]}{p // 12 - 1}"                                  # noqa: E731
 
 
 # ---------- 1. 对不上的行不放 ----------
@@ -124,8 +130,10 @@ def phrases(notes: list[tuple]) -> list[list[int]]:
     return out
 
 
-def chant(notes: list[tuple], beat_sec) -> tuple[list[tuple], list[str]]:
-    """beat_sec(秒) → 那一刻一拍多少秒。→ (新的音, 改了什么)。"""
+def chant(notes: list[tuple], beat_sec, all_one: bool = False) -> tuple[list[tuple], list[str]]:
+    """beat_sec(秒) → 那一刻一拍多少秒。→ (新的音, 改了什么)。
+    all_one（创作者 09-30 晚：「如果识别为念唱（保守识别），就全部用一个音，然后让创作者自己调」）：认出来的整句全部用主音、去掉音分微调；
+    不给就是先前那版（离主音 1 个半音的拉回、离得远的留着）。认法两版一样。"""
     notes = sorted(notes)
     out, log = list(notes), []
     for ph in phrases(notes):
@@ -143,6 +151,19 @@ def chant(notes: list[tuple], beat_sec) -> tuple[list[tuple], list[str]]:
         far = [k for k in sung if abs(ps[k] - tone) >= 2]
         if len(far) > len(sung) // 4:
             continue
+        jit = [k for k in sung if abs(ps[k] - tone) == 1]
+        if all_one and (len(jit) < 2 or len(jit) < 0.25 * len(sung)):
+            # 保守识别（「全部用一个音」时才要）：念唱的音不稳，GAME 会在主音上下一个半音之间来回扒（《刽子手》第 1 行 4 个、第 12 行 3 个）；
+            # 稳稳唱在一个音上、只有一两个真不一样的（主歌 0:18、0:21、0:25、0:40、1:41、1:45 都是 G3 上 + 一两个 A3 / A#3，创作者都没改）不是念唱
+            continue
+        span = f"{fmt(notes[ph[0]][0])}–{fmt(notes[ph[-1]][0] + notes[ph[-1]][1])}"
+        if all_one:
+            changed = [k for k in ph if out[k][2] != tone * 100.0]
+            for k in ph:
+                s, d, c, ly = out[k]
+                out[k] = (s, d, float(tone * 100), ly)
+            log.append(f"{span} 念唱（带字的 {len(sung)} 个）：整句 {len(ph)} 个音全部用主音 {name(tone)}（改了 {len(changed)} 个），要你自己调")
+            continue
         changed, last = [], None
         for k in ph:                                              # 带字的：离主音 1 个半音的拉回；拖音：跟着前一个字（句首的归主音）
             p = int(round(out[k][2] / 100))
@@ -156,8 +177,7 @@ def chant(notes: list[tuple], beat_sec) -> tuple[list[tuple], list[str]]:
                 out[k] = (s, d, float(q * 100 + (c - p * 100)), ly)
                 changed.append(k)
         if changed:
-            log.append(f"{fmt(notes[ph[0]][0])}–{fmt(notes[ph[-1]][0] + notes[ph[-1]][1])} 念唱（带字的 {len(sung)} 个、主音 {tone}）："
-                       f"改了音高 {len(changed)} 个，留着不一样的 {len(far)} 个")
+            log.append(f"{span} 念唱（带字的 {len(sung)} 个、主音 {tone}）：改了音高 {len(changed)} 个，留着不一样的 {len(far)} 个")
     return out, log
 
 
@@ -301,6 +321,21 @@ def selftest() -> list[str]:
     got, _ = chant(n1, beat)
     if [int(g[2] // 100) for g in got] != [68, 68, 68, 68, 72, 72, 68, 68, 66, 68, 68]:
         fails.append(f"夹着拖音的念唱没认对：{[int(g[2] // 100) for g in got]}")
+    # 全部用一个音（09-30 晚）：认出来的整句（连拖音）都是主音、没有音分微调；认不出来的照旧不动
+    got, _ = chant([(s, d, c + 30.0, ly) for s, d, c, ly in n1], beat, all_one=True)
+    if any(g[2] != 6800.0 for g in got):
+        fails.append(f"念唱没全部用一个音：{[g[2] for g in got]}")
+    got, _ = chant(mk([66, 68, 69, 68, 69, 65, 68, 69]), beat, all_one=True)
+    if any(g[2] != 6800.0 for g in got):
+        fails.append(f"念唱没全部用一个音：{[g[2] for g in got]}")
+    verse = [55, 55, 55, 55, 55, 57, 55, 55]                                      # 主歌：稳稳在 G3 上、一个 A3
+    got, _ = chant(mk(verse), beat, all_one=True)
+    if [int(g[2] // 100) for g in got] != verse:
+        fails.append("稳稳唱在一个音上的主歌被当成念唱拉平了")
+    for ps_, why in ((two, "两个音交替的"), (mel, "旋律")):
+        got, _ = chant(mk(ps_), beat, all_one=True)
+        if [int(g[2] // 100) for g in got] != ps_:
+            fails.append(f"全部用一个音时，{why}被当成念唱了")
     return fails
 
 
