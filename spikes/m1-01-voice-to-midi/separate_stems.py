@@ -85,6 +85,9 @@ def main(src: str, out_dir: str, threads: str = "8") -> int:
     low_priority()
     import torch
     torch.set_num_threads(int(threads))
+    # 10-01 换显卡（创作者同意下 CUDA 版 torch 2.14.0+cu130）：有显卡 audio-separator 就自动用，用的是 32 位（不是半精度）。
+    # 《逃跑的天使》对 CPU 版：波形差约 1%（信噪比 36–42 dB；试过关掉 TF32，一模一样 → 不是 TF32 来的）；
+    # 拿去扒谱，音符 F1 0.994 —— 比 Vocal2Midi 同一份主唱跑两次的差别（0.991）还小 → 创作者定用显卡。分离 25 分钟 → 约 75 秒
     from audio_separator.separator import Separator
 
     out = pathlib.Path(out_dir)

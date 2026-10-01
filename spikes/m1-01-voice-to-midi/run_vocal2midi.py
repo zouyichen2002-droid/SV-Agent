@@ -30,12 +30,17 @@ V2M = pathlib.Path("E:/sv-agent-data/tools/Vocal2Midi")
 sys.path.insert(0, str(V2M))
 
 
-def _stub_pyopenjtalk() -> None:
+def _stub_pyopenjtalk(language: str = "zh") -> None:
     """它的歌词模块一加载就 import pyopenjtalk（只有日语用），而 Windows 上没有现成的包。
-    这里放一个占位：不改它的代码；万一真走到日语那条路，直接报错，不会悄悄出错。"""
+    日语：换成 fugashi + unidic-lite 做的替身（ja_g2p_fugashi.py，10-01）；别的语言放一个占位 ——
+    不改它的代码；万一真走到日语那条路，直接报错，不会悄悄出错。"""
     try:
         import pyopenjtalk  # noqa: F401
     except ImportError:
+        if language == "ja":
+            import ja_g2p_fugashi
+            ja_g2p_fugashi.install()
+            return
         import types
         stub = types.ModuleType("pyopenjtalk")
 
@@ -52,7 +57,10 @@ def main() -> int:
     ap.add_argument("name")
     ap.add_argument("--asr", action="store_true", help="带歌词模式，但不给原歌词：全靠它自己听写")
     ap.add_argument("--lyrics", help="原歌词文本（UTF-8）；给了就走带歌词模式，并拿它去对听写结果")
-    ap.add_argument("--lyric-mode", default="pinyin", choices=["pinyin", "hanzi"], help="导出的歌词用拼音还是汉字（终稿用的是拼音）")
+    ap.add_argument("--language", default="zh", choices=["zh", "en", "ja"],
+                    help="唱的什么语言（10-01 加 en / ja）：听写、对齐、导出的字都按它")
+    ap.add_argument("--lyric-mode", default=None, choices=["pinyin", "hanzi", "word", "kana", "romaji"],
+                    help="导出的歌词：中文默认拼音（终稿用的是拼音）、英文整词（后面的音节写 +）、日语默认假名")
     ap.add_argument("--device", default="dml")
     ap.add_argument("--nsteps", type=int, default=8)
     ap.add_argument("--batch-size", type=int, default=4,
@@ -64,6 +72,7 @@ def main() -> int:
     ap.add_argument("--low-priority", action="store_true",
                     help="进程优先级调成「低于正常」（它开的子进程跟着低）—— 跑得久也不跟创作者抢机器（09-30 他说「好卡啊」）")
     a = ap.parse_args()
+    a.lyric_mode = a.lyric_mode or {"zh": "pinyin", "en": "word", "ja": "kana"}[a.language]
     with_lyrics = bool(a.asr or a.lyrics)
     if a.low_priority and sys.platform == "win32":
         import ctypes
@@ -73,7 +82,7 @@ def main() -> int:
         if not k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000):   # BELOW_NORMAL_PRIORITY_CLASS
             print("（没调成低优先级）", flush=True)
 
-    _stub_pyopenjtalk()
+    _stub_pyopenjtalk(a.language)
     from inference.pipeline.auto_lyric_hybrid import auto_lyric_hybrid_pipeline  # noqa: E402  他们的流水线
 
     models = V2M / "models"
@@ -87,8 +96,9 @@ def main() -> int:
         game_model_dir=str(models / "GAME-1.0.3-medium-onnx"),
         hfa_model_dir=str(models / "1218_hfa_model_new_dict"),
         asr_model_path=str(models / "Qwen3-ASR-1.7B-dml"),
-        device=a.device, ts=ts, language="zh",
+        device=a.device, ts=ts, language=a.language,
         lyric_output_mode=a.lyric_mode, original_lyrics=lyrics,
+        japanese_asr_engine="qwen",                      # 日语：它默认的罗马音听写模型本机没有 → 直接用 Qwen3-ASR + 日语读音（替身）
         output_formats=["mid", "txt", "csv"],
         slicing_method=a.slicing, tempo=120.0, quantization_step=0, quantization_mode="smart",
         pitch_format="name", round_pitch=True,
@@ -99,7 +109,7 @@ def main() -> int:
     secs = time.perf_counter() - t0
     made = sorted(p.name for p in out.glob(f"{a.name}*"))
     mode = "lyrics+reference" if a.lyrics else ("lyrics-asr-only" if a.asr else "no-lyrics")
-    info = {"audio": a.audio, "mode": mode, "lyric_mode": a.lyric_mode, "device": a.device,
+    info = {"audio": a.audio, "mode": mode, "language": a.language, "lyric_mode": a.lyric_mode, "device": a.device,
             "batch_size": a.batch_size, "asr_batch_size": a.asr_batch_size, "low_priority": a.low_priority, "slicing": a.slicing,
             "ts": ts, "seconds": round(secs, 1), "outputs": made}
     (out / f"{a.name}_run.json").write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")

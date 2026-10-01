@@ -6,7 +6,8 @@ v3 阶段 0（2026-10-01）在这台机器上搭 DeepSeek Harness（DSH）用的
 | 这里 | 实际在用的那份 | 是什么 |
 |---|---|---|
 | `profile-web.cordis.patch.yml` | `E:\sv-agent-data\dsh-home\profiles\web\cordis.patch.yml` | 我们的补丁层：模型 → 本地 llama；选目录 → 网页对话框；默认预设「SV 创作」（16 个工具，压缩按 16k 配）；挂我们自己的插件 |
-| `plugins/` | **只有这里一份**（补丁里用绝对路径直接指过来，不复制） | 我们自己写的 DSH 插件：`sv-project`（阶段 1：一首歌一个工作区，Agent 知道在做哪首歌）、`sv-artifact`（阶段 2：版本、交付后拦住覆盖、创作者改了自动备份）—— 见各自的 README |
+| `plugins/` | **只有这里一份**（补丁里用绝对路径直接指过来，不复制） | 我们自己写的 DSH 插件：`sv-project`（阶段 1：一首歌一个工作区，Agent 知道在做哪首歌）、`sv-artifact`（阶段 2：版本、交付后拦住覆盖、创作者改了自动备份）、`sv-cover`（阶段 3：对话里翻唱一首歌）—— 见各自的 README |
+| `skills/` | **只有这里一份**（「SV 创作」预设的 skill-filesystem 用 customSkillDirs 指过来） | 我们写的技能说明：`sv-cover`（什么时候、怎么调 cover_run） |
 | `start-llama.sh` | `E:\sv-agent-data\dsh\start-llama.sh` | 本地模型服务：llama.cpp CUDA 版 + Qwen3.8-27B，要密钥、跨域只认本机、关 `/slots` |
 | `start-dsh-web.sh` | `E:\sv-agent-data\dsh\start-dsh-web.sh` | DSH 网页界面：只开本机、遥测关、权限预设 workspace-write |
 

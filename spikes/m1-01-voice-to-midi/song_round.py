@@ -44,6 +44,13 @@ TOL = 0.001
 
 
 FRAG = 0.040            # 短于 40 ms 的算碎片
+# 配置里的 language（10-01 加；不写 = zh）：英文、日语时声库用 SV 的跨语种（写法照 SV 官方示例工程：轨的 database 和每个音的 attributes 都写）
+SV_LANG = {"en": ("english", "arpabet"), "ja": ("japanese", "romaji")}
+
+
+def rest_lyric(cfg: dict) -> str:
+    """没字的音默认唱什么：中文、英文 la；日语 ら（la 在日语里不是假名）。"""
+    return "ら" if cfg.get("language") == "ja" else "la"
 
 
 def merge_fragments(notes: list[tuple]) -> tuple[list[tuple], int]:
@@ -72,6 +79,18 @@ def merge_fragments(notes: list[tuple]) -> tuple[list[tuple], int]:
                 continue
         i += 1
     return [tuple(n) for n in out], merged
+
+
+def trim_overlaps(notes: list[tuple]) -> tuple[list[tuple], int]:
+    """和下一个音重叠的，结尾截到下一个音开头（10-01：英文《INTERGALACTIA》Vocal2Midi 出了 1 处、重叠 71 ms，
+    吸格线前那份自检报「有音重叠」；中文、日语这几首一处都没有 → 对它们什么都不改）。"""
+    out = [list(n) for n in sorted(notes)]
+    cut = 0
+    for i in range(len(out) - 1):
+        if out[i][0] + out[i][1] > out[i + 1][0] + TOL:
+            out[i][1] = max(0.001, out[i + 1][0] - out[i][0])
+            cut += 1
+    return [tuple(n) for n in out], cut
 
 
 def _fragment_selftest() -> list[str]:
@@ -164,14 +183,20 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
     for p in ours["mainGroup"]["parameters"].values():
         if isinstance(p, dict) and "points" in p:
             p["points"] = []
+    lang = SV_LANG.get(cfg.get("language", "zh"))
+    if lang:
+        ours["mainRef"]["database"].update(languageOverride=lang[0], phonesetOverride=lang[1])
     notes = []
     for r in rows:
         a, du = blicks_of(r, tempo)
         pitch = r["pitch"]
+        attrs = {"evenSyllableDuration": True, "muted": False}
+        if lang:
+            attrs.update(languageOverride=lang[0], phonesetOverride=lang[1])
         notes.append({"uuid": uuid.uuid4().hex[:16], "musicalType": "singing", "onset": int(a), "duration": int(du),
-                      "lyrics": r["lyric"] or "la", "phonemes": "", "accent": "", "pitch": pitch,
+                      "lyrics": r["lyric"] or rest_lyric(cfg), "phonemes": "", "accent": "", "pitch": pitch,
                       "detune": int(round(r["cents"] - pitch * 100)),
-                      "attributes": {"evenSyllableDuration": True, "muted": False},
+                      "attributes": attrs,
                       "takes": {"activeTakeId": 0, "takes": [{"id": 0, "seedDuration": 0, "seedPitch": 0, "seedTimbre": 0,
                                                               "liked": False}]}})
     ours["mainGroup"]["notes"] = notes
@@ -196,7 +221,7 @@ def check(path: pathlib.Path, cfg: dict, tempo: list[dict], rows: list[dict], tr
     if len(got) != len(rows):
         return [f"「{track_name}」音数 {len(got)} ≠ {len(rows)}"]
     for (x, dx, cx, lx), r in zip(got, rows):
-        if int(round(cx / 100)) != r["pitch"] or lx != (r["lyric"] or "la"):
+        if int(round(cx / 100)) != r["pitch"] or lx != (r["lyric"] or rest_lyric(cfg)):
             fails.append(f"音高或歌词不对：{lx} {cx} vs {r['lyric']} {r['pitch']}")
             break
         if abs(x - r["q_on_s"]) > TOL or abs((x + dx) - r["q_off_s"]) > TOL:
@@ -252,7 +277,9 @@ def main(cfg_path: str) -> int:
         print("碎片合并的自检不过：", fails)
         return 1
     notes0, n_frag = merge_fragments(sorted(E.load(cfg["v2m_mid"])))
-    print(f"GAME 的碎片（短于 {FRAG * 1000:.0f} ms、紧贴同音高）并掉 {n_frag} 个")
+    notes0, n_cut = trim_overlaps(notes0)
+    print(f"GAME 的碎片（短于 {FRAG * 1000:.0f} ms、紧贴同音高）并掉 {n_frag} 个"
+          + (f"；和下一个音重叠的 {n_cut} 个，结尾截到下一个音开头" if n_cut else ""))
     rule_log: dict[str, list] = {}
     kept_lens: list[int] | None = None                           # 放进主唱的每行字数（新规矩 4 用）
     if cfg.get("lyrics"):
@@ -291,6 +318,10 @@ def main(cfg_path: str) -> int:
         print(f"扒出 {len(notes0)} 个音；歌词 {len(chars)} 个字。修歌词：{acts}")
         print(f"  歌词对得上的：听写 {before_lyr} → 修完 {after_lyr}")
         print(f"  听写和歌词明显不一样的 {len(diff)} 处（照歌词放了）")
+    elif cfg.get("language", "zh") != "zh":                      # 英文、日语（10-01）：Vocal2Midi 已经拿歌词对过听写（修字是按拼音的，用不上）
+        chars, fixed, log, acts, diff = [], list(notes0), [], {}, []
+        before_lyr = after_lyr = {"说明": f"{cfg['language']}：字用 Vocal2Midi 拿歌词对好的，这里不修"}
+        print(f"扒出 {len(notes0)} 个音；{cfg['language']} —— 字用 Vocal2Midi 拿歌词对好的，不修")
     else:                                                        # 没给歌词：字就用听写出来的（拼音），不修
         chars, fixed, log, acts, diff = [], list(notes0), [], {}, []
         before_lyr = after_lyr = {"说明": "没给歌词：只用听写出来的字（拼音），不修"}

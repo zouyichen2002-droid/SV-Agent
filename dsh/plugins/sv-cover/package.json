@@ -1,0 +1,9 @@
+{
+  "name": "@sv-agent/dsh-cover",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SV-Agent 的 Cover Skill 插件：对话里翻唱一首歌，后台跑 Python Worker，产物写进项目的 rNN 并交付",
+  "exports": { ".": "./index.js" },
+  "scripts": { "test": "node test.mjs" }
+}

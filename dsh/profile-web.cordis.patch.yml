@@ -63,6 +63,9 @@
             name: '@deepseek-ai/dsh-tool-jobs'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs:            # 我们的技能只在仓库里一份（阶段 3 起：sv-cover）
+                - E:/sv-bridge/dsh/skills
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
           - id: compaction
@@ -118,6 +121,22 @@
       config:
         root: E:/sv-agent-workspace
         store: E:/sv-agent-data/snapshots
+# sv-cover（阶段 3）：对话里翻唱 → 后台跑 sv-bridge/worker/cover_run.py（包进沙箱）→ rNN 出 .svp 并交付；
+# 跑的时候让出本地大模型、跑完载回（创作者 10-01 定）；歌词从创作者以「歌词：」开头的消息里原样取
+    - id: sv-cover
+      name: E:/sv-bridge/dsh/plugins/sv-cover/index.js
+      config:
+        root: E:/sv-agent-workspace
+        store: E:/sv-agent-data/snapshots
+        python: G:/miniconda/python.exe
+        worker: E:/sv-bridge/worker/cover_run.py
+        # 10-01 实测：Vocal2Midi 听写（Qwen3-ASR）写死了另起进程（multiprocessing），Windows 上走命名管道，DSH 沙箱不许开命名管道 → WinError 5。
+        # 所以 Worker 不进沙箱：它是我们自己的固定流程（模型只给来源 / 用不用歌词，插件先校验），只往这首歌的项目文件夹里写；插件本身也不在沙箱里
+        sandbox: false
+        llama:
+          port: 8081
+          start: [ 'C:/Program Files/Git/bin/bash.exe', 'E:/sv-agent-data/dsh/start-llama.sh' ]
+          log: E:/sv-agent-data/dsh/llama-server.log
 # 选目录用网页里的浏览器（browse），不用原生对话框：本机 + Windows 时自动选 native，会在创作者桌面上弹 Windows 选文件夹窗口
 #（补丁不能改已有条目的插件名 → 关掉自动选择器、另插 browse 的两半：本机服务 + 网页界面；自动选择器原本就是挂这两条）
 - id: directory-picker

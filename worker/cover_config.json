@@ -1,0 +1,22 @@
+{
+  "_说明": "cover_run.py 在这台机器上用的程序和模型路径（10-01）。换机器只改这个文件。",
+  "python": "G:/miniconda/python.exe",
+  "separator_python": "E:/sv-agent-data/envs/separator/Scripts/python.exe",
+  "vocal2midi_python": "E:/sv-agent-data/envs/vocal2midi/Scripts/python.exe",
+  "pi_audio_python": "E:/sv-agent-data/envs/pi-audio/Scripts/python.exe",
+  "yt_dlp": "G:/miniconda/Scripts/yt-dlp.exe",
+  "ffmpeg": "C:/Users/admin/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0-full_build/bin/ffmpeg.exe",
+  "spikes": "E:/sv-bridge/spikes",
+  "default_voice": "星尘",
+  "voices": {
+    "星尘": {
+      "_说明": "创作者 10-01 定默认用星尘（和 M1 一样）。base 是 M1 已经生成好的《逃跑的天使》模板的一份拷贝 —— 不再去碰创作者「临时文件5」里的工程",
+      "base": "E:/sv-agent-data/cover/templates/星尘.svp",
+      "voice_track": "人声（MEDIUM5·Stardust，模板）",
+      "accomp_track": "伴奏",
+      "ref_track": "原曲人声（分离，参考，静音）"
+    }
+  },
+  "separation_threads": 8,
+  "basic_pitch_threads": 4
+}
