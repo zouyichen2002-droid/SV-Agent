@@ -1,0 +1,9 @@
+{
+  "name": "@sv-agent/dsh-project",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SV-Agent 的 Project 插件：一首歌一个 DSH 工作区；给 Agent「当前项目」上下文和项目工具",
+  "exports": { ".": "./index.js" },
+  "scripts": { "test": "node test.mjs" }
+}

@@ -101,8 +101,8 @@
 **分工**：DSH / TypeScript 管状态和决定（项目、版本、会话、记忆、权限、工具调度、界面、模型调用）；Python 只管算、产出候选文件。
 
 **阶段**（每一步都要真的产出东西）：
-0. 原样跑通 DSH（本地模型）；弄懂 Context / Plugin / Service、Session / Tool / Agent Loop
-1. Project 插件 → 项目上下文　2. Artifact 插件 → 管 wav / mid / svp / 歌词 / 试听　3. 封装 Cover Skill，接现有 Python 翻唱链路
+0. 原样跑通 DSH（本地模型）；弄懂 Context / Plugin / Service、Session / Tool / Agent Loop —— **10-01 完**（`docs/v3/s0-dsh.md`）
+1. Project 插件 → 项目上下文（**10-01 做完、在 DSH 里测过**，你定「一首歌一个工作区」：`docs/v3/s1-project.md`）　2. Artifact 插件 → 管 wav / mid / svp / 歌词 / 试听　3. 封装 Cover Skill，接现有 Python 翻唱链路
 4. **在 DSH 的对话里真的调用 Cover Skill、真的产出 `.svp`**（第一个可交付）　5. 第二个简单 Skill（比如 MIDI → 钢琴试听），验证插件架构：只加新插件、不改核心
 6. 创作记忆（反馈 / 偏好 / 历史）　7. 创作口味、喜爱作品 → 创作者画像　8. 分析 / 教学 / 逆向学习　9. GUI 工具（FL、SynthV 等没有接口的软件）
 10. 图像 / 视频 / PV　11. 按真实需要改 DSH 的子系统（创作会话、创作循环、工具运行）　12. 只在必要时改 DSH 核心

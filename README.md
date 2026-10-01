@@ -10,7 +10,8 @@
 - **方向（v3）**：从翻唱 / 创作助手往**个人创作工作台**长 —— 作品管理、个人偏好、创作口味、喜爱作品、逆向学习记忆、Skill 接入、GUI 操作、教学……
   以 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 当 Agent 底座，先原样用、再一步步改，我们只写创作领域的插件；第一个 Skill 就是上面的翻唱链路。
   模型本地为主（llama.cpp + Qwen3.8-27B），上下文不够时用 DeepSeek 的接口
-- **阶段 0 完**：DSH 在本机原样跑通（本地模型、专用工作区、沙箱、审批），也弄清楚了它怎么搭起来的 —— 见 [docs/v3/s0-dsh.md](docs/v3/s0-dsh.md)。下一步是阶段 1：Project 插件
+- **阶段 0 完**：DSH 在本机原样跑通（本地模型、专用工作区、沙箱、审批），也弄清楚了它怎么搭起来的 —— 见 [docs/v3/s0-dsh.md](docs/v3/s0-dsh.md)
+- **阶段 1 做完**：Project 插件 —— 一首歌一个工作区，在哪首歌下面开会话，Agent 就知道是哪首、做到哪了；做过的 5 首已建成项目 —— 见 [docs/v3/s1-project.md](docs/v3/s1-project.md)。下一步是阶段 2：Artifact 插件（管 wav / mid / svp / 歌词和它们的版本）
 
 > 这是 v2（2026-09 清空重写）。v1 的代码在标签 `v1-archive`；第一个发布在标签 `v0.1.0`（那时只有《傍晚》一首）。需求见 [PRD.md](PRD.md)。
 
@@ -101,8 +102,8 @@ v3 的平台（DSH）在本机怎么搭：补丁、启动脚本和换机器重�
 | [PRD.md](PRD.md) | 产品需求（给作者本人看） |
 | [docs/m0/](docs/m0) | 可行性验证记录（SynthV / FL 工程读写、钢琴试听、发布入口等） |
 | [docs/m1/](docs/m1) | 翻唱链路的站末材料：五首歌、失败案例、成本 |
-| [docs/v3/](docs/v3) | v3 各阶段的笔记（阶段 0：原样跑通 DSH） |
-| [dsh/](dsh) | DSH 本机配置的副本 |
+| [docs/v3/](docs/v3) | v3 各阶段的笔记（阶段 0：原样跑通 DSH；阶段 1：Project 插件） |
+| [dsh/](dsh) | DSH 本机配置的副本；我们自己写的 DSH 插件（[dsh/plugins/](dsh/plugins)） |
 | [spikes/m1-01-voice-to-midi/](spikes/m1-01-voice-to-midi) | 扒谱：各种做法的对比、两个裁判、Vocal2Midi、分离、补段、作者定的规矩、一版一版写 SynthV 工程 |
 | [spikes/m1-02-harmony/](spikes/m1-02-harmony) | 叠唱检测、挑八度、基线与回归检查 |
 | [spikes/m1-03-lyrics/](spikes/m1-03-lyrics) | 按作者给的歌词修歌词 |

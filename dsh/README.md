@@ -5,7 +5,8 @@ v3 阶段 0（2026-10-01）在这台机器上搭 DeepSeek Harness（DSH）用的
 
 | 这里 | 实际在用的那份 | 是什么 |
 |---|---|---|
-| `profile-web.cordis.patch.yml` | `E:\sv-agent-data\dsh-home\profiles\web\cordis.patch.yml` | 我们的补丁层：模型 → 本地 llama；选目录 → 网页对话框；默认预设「SV 创作」（16 个工具，压缩按 16k 配） |
+| `profile-web.cordis.patch.yml` | `E:\sv-agent-data\dsh-home\profiles\web\cordis.patch.yml` | 我们的补丁层：模型 → 本地 llama；选目录 → 网页对话框；默认预设「SV 创作」（16 个工具，压缩按 16k 配）；挂我们自己的插件 |
+| `plugins/` | **只有这里一份**（补丁里用绝对路径直接指过来，不复制） | 我们自己写的 DSH 插件：`sv-project`（阶段 1：一首歌一个工作区，Agent 知道在做哪首歌）—— 见各自的 README |
 | `start-llama.sh` | `E:\sv-agent-data\dsh\start-llama.sh` | 本地模型服务：llama.cpp CUDA 版 + Qwen3.8-27B，要密钥、跨域只认本机、关 `/slots` |
 | `start-dsh-web.sh` | `E:\sv-agent-data\dsh\start-dsh-web.sh` | DSH 网页界面：只开本机、遥测关、权限预设 workspace-write |
 
@@ -27,5 +28,5 @@ bash E:/sv-agent-data/dsh/start-dsh-web.sh   # 再起 DSH；带令牌的访问�
 1. Node 24；`npm install @deepseek-ai/dsh@0.2.0-rc.2`（锁版本，开发者预览）装到 `E:\sv-agent-data\dsh`
 2. llama.cpp b11259 CUDA 版 + 模型文件（型号和参数见 `docs/v3/s0-dsh.md` §2）
 3. 生成模型服务密钥文件 `llama.key`：第一行 `#` 注释，第二行一个随机串（两个启动脚本都从这里读）
-4. 补丁放到 `DSH_HOME\profiles\web\cordis.patch.yml`，用 `dsh --profile web --dump-config` 看合并结果
+4. 补丁放到 `DSH_HOME\profiles\web\cordis.patch.yml`，用 `dsh --profile web --dump-config` 看合并结果（插件那几行写的是本仓库的绝对路径，仓库换了位置要跟着改）
 5. 工作区 `E:\sv-agent-workspace`：要给自己加「完全控制」（Windows 沙箱要打低完整性标签；只有「修改」会让沙箱里的命令全失败，见 `docs/v3/s0-dsh.md` §2）
