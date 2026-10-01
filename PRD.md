@@ -102,8 +102,8 @@
 
 **阶段**（每一步都要真的产出东西）：
 0. 原样跑通 DSH（本地模型）；弄懂 Context / Plugin / Service、Session / Tool / Agent Loop —— **10-01 完**（`docs/v3/s0-dsh.md`）
-1. Project 插件 → 项目上下文（**10-01 做完、在 DSH 里测过**，你定「一首歌一个工作区」：`docs/v3/s1-project.md`）　2. Artifact 插件 → 管 wav / mid / svp / 歌词 / 试听（**10-01 做完、我在 DSH 里测过**：一版一个 rNN、交付后拦住覆盖、你改了自动备份；试听你定放到阶段 5：`docs/v3/s2-artifact.md`）　3. 封装 Cover Skill，接现有 Python 翻唱链路
-4. **在 DSH 的对话里真的调用 Cover Skill、真的产出 `.svp`**（第一个可交付）　5. 第二个简单 Skill（比如 MIDI → 钢琴试听），验证插件架构：只加新插件、不改核心
+1. Project 插件 → 项目上下文（**10-01 做完、在 DSH 里测过**，你定「一首歌一个工作区」：`docs/v3/s1-project.md`）　2. Artifact 插件 → 管 wav / mid / svp / 歌词 / 试听（**10-01 做完、我在 DSH 里测过**：一版一个 rNN、交付后拦住覆盖、你改了自动备份；试听你定放到阶段 5：`docs/v3/s2-artifact.md`）　3. 封装 Cover Skill，接现有 Python 翻唱链路（**10-01 做完**：`worker/cover_run.py` 一条命令 + `sv-cover` 插件；为你给的六首加了英文、日语：`docs/v3/s3-cover.md`）
+4. **在 DSH 的对话里真的调用 Cover Skill、真的产出 `.svp`**（第一个可交付；**10-01 走通**：《逃跑的天使》+ 你给的六首都在 DSH 里一句话翻出 svp，我操作的、等你听 —— `docs/v3/s3-cover.md` §3.3–3.4）　5. 第二个简单 Skill（比如 MIDI → 钢琴试听），验证插件架构：只加新插件、不改核心
 6. 创作记忆（反馈 / 偏好 / 历史）　7. 创作口味、喜爱作品 → 创作者画像　8. 分析 / 教学 / 逆向学习　9. GUI 工具（FL、SynthV 等没有接口的软件）
 10. 图像 / 视频 / PV　11. 按真实需要改 DSH 的子系统（创作会话、创作循环、工具运行）　12. 只在必要时改 DSH 核心
 

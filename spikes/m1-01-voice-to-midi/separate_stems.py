@@ -56,6 +56,17 @@ def lag_corr(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return float(-lags[m][i] / 8.0), float(c[m][i] / math.sqrt(float(np.dot(x, x)) * float(np.dot(y, y)) + 1e-12))
 
 
+def lead_wins(ld: np.ndarray, bk: np.ndarray) -> tuple[float, float]:
+    """100 ms 一帧（8 kHz），两条里至少一条有声（离整首最响 40 dB 以内）的帧里：主唱更响的占几成、主唱减叠唱的中位 dB。"""
+    n = min(len(ld), len(bk)) // 800
+    db = lambda x: 10 * np.log10(np.mean(x[: n * 800].reshape(n, 800) ** 2, axis=1) + 1e-12)   # noqa: E731
+    a, b = db(ld), db(bk)
+    on = (a > max(a.max(), b.max()) - 40) | (b > max(a.max(), b.max()) - 40)
+    if not on.any():
+        return 0.0, 0.0
+    return float(np.mean(a[on] > b[on])), float(np.median(a[on] - b[on]))
+
+
 def pick(files: list[str], out: pathlib.Path, src: pathlib.Path, *words: str) -> pathlib.Path:
     """按括号里的名字挑输出（不分大小写）：各模型起名不一样 —— vocals_mel_band_roformer 叫 (vocals) / (other)，
     karaoke 叫 (Vocals) / (Instrumental)（这个模型的用途是「去掉主唱」：Vocals = 主唱，Instrumental = 剩下的叠唱）。
@@ -137,7 +148,12 @@ def main(src: str, out_dir: str, threads: str = "8") -> int:
     if abs(lag2) > 1.0 or r2 < 0.95:
         fails.append(f"主唱 + 叠唱 和人声对不上（晚 {lag2:.1f} ms、相关 {r2:.3f}）")
     if e(ld) <= e(bk):     # 上面几条对主唱 / 叠唱是对称的，标反了查不出来 —— 主唱一般比叠唱响
-        fails.append(f"主唱（{e(ld)} dB）不比叠唱（{e(bk)} dB）响 —— 可能标反了，去听")
+        # 整首比不过时再逐段看（10-01《倒瞰清白》，川剧帮腔：整首叠唱 -23.9 dB 比主唱 -24.5 dB 响，可 100 ms 一帧看，
+        # 主唱更响的占 59%、中位 +5.4 dB，只有帮腔那几段是叠唱响 —— 没标反）。真标反时（09-30《潮声回响》）主唱只在约 31% 的时候更响
+        frac, med = lead_wins(ld, bk)
+        checks["主唱更响的时间"] = {"占有声的帧": round(frac, 3), "中位差 dB": round(med, 1)}
+        if not (frac > 0.5 and med > 0):
+            fails.append(f"主唱（{e(ld)} dB）不比叠唱（{e(bk)} dB）响，逐段看也只有 {frac:.0%} 的时候更响（中位 {med:+.1f} dB）—— 可能标反了，去听")
     log["fails"] = fails
     (out / "separate_log.json").write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     for k, v2 in checks.items():

@@ -161,6 +161,33 @@ def extend(curves: dict, g: dict, dur: float) -> dict:
     return dict(g, start_s=float(lines[i0]), end_s=end, ref_ms=ref)
 
 
+def drop_covered(grids: list[dict]) -> tuple[list[dict], list[str]]:
+    """按小节扩完以后，被另一段整个盖住的段不要（两段互相盖住 = 一样长：留「1」合分高的）。
+    10-01《调查中》：0–16 s 一段 163.89（「1」2.70 / 第二名 2.59，拿不准）被 10–24 s 那段 163.38（5.09 / 0.91）往前扩到 0.56–22.59 s 整个盖住，
+    两串小节线差 151 ms 接不上 → 后一段从它自己的第一条小节线（0.56 s，比前一段的结尾还早）另起 → 组装出 -14.7 BPM、时间倒着走，模板自检不过。
+    没有被盖住的段（以前跑过的几首都是）→ 原样返回，结果和以前一模一样。"""
+    keep, dropped = list(grids), []
+    changed = True
+    while changed:
+        changed = False
+        for i, g in enumerate(keep):
+            tol = 0.5 * g["bar_s"]
+            for j, h in enumerate(keep):
+                if i == j or not (h["start_s"] <= g["start_s"] + tol and h["end_s"] >= g["end_s"] - tol):
+                    continue
+                mutual = g["start_s"] <= h["start_s"] + 0.5 * h["bar_s"] and g["end_s"] >= h["end_s"] - 0.5 * h["bar_s"]
+                if mutual and g["score"] > h["score"]:
+                    continue                                       # 一样长、它的「1」更有把握：留它，等轮到 h 时去掉 h
+                dropped.append(f"{g['start_s']:.2f}–{g['end_s']:.2f} s 的 {g['bpm']:.3f} BPM（「1」合分 {g['score']:.2f}）"
+                               f"被 {h['start_s']:.2f}–{h['end_s']:.2f} s 的 {h['bpm']:.3f}（{h['score']:.2f}）整个盖住，不要")
+                del keep[i]
+                changed = True
+                break
+            if changed:
+                break
+    return keep, dropped
+
+
 def join(a: dict, b: dict) -> dict:
     """a 在前、b 在后：交界附近（a 的结尾 ±3 小节）两串小节线最近的一对。"""
     lo, hi = min(a["end_s"], b["start_s"]) - 3 * a["bar_s"], max(a["end_s"], b["start_s"]) + 3 * b["bar_s"]
@@ -239,6 +266,17 @@ def selftest() -> list[str]:
                       ([{"from_s": 0, "to_s": 40, "bpm": 120.0}, {"from_s": 44, "to_s": 90, "bpm": 120.05}], "不重叠的")):
         if len(merge_runs(runs)) != 2:
             fails.append(f"{why}被并成了一段")
+    # 被另一段整个盖住的段去掉（《调查中》那种：数照 10-01 的抄、造的）；首尾相接、各有各的地方的不动
+    g = lambda s, e, sc, b=160.0: {"start_s": s, "end_s": e, "score": sc, "bpm": b, "bar_s": 240.0 / b}   # noqa: E731
+    kept, why = drop_covered([g(0.77, 16.88, 2.70), g(0.56, 22.59, 5.09), g(21.12, 204.0, 3.95), g(201.08, 215.70, 3.51)])
+    if [round(x["start_s"], 2) for x in kept] != [0.56, 21.12, 201.08] or len(why) != 1:
+        fails.append(f"被盖住的段没去掉：{[x['start_s'] for x in kept]}")
+    kept, why = drop_covered([g(0.5, 40.0, 3.0), g(38.0, 90.0, 3.0)])
+    if len(kept) != 2 or why:
+        fails.append("首尾相接的两段被去掉了一段")
+    kept, why = drop_covered([g(0.5, 40.0, 2.0), g(0.6, 40.2, 4.0)])
+    if len(kept) != 1 or kept[0]["score"] != 4.0:
+        fails.append(f"一样长的两段没留「1」更有把握的那段：{kept}")
     rng = np.random.default_rng(21)
     sr = 22050
     dur = 100.0
@@ -334,6 +372,11 @@ def main(cfg_path: str, *flags: str) -> int:
         runs = merge_runs(stable_runs(w))
         grids = [extend(curves, section_grid(curves, feat, r["from_s"], r["to_s"], r["bpm"]), dur) for r in runs]
         joins = [join(a, b) for a, b in zip(grids[:-1], grids[1:])]
+    grids, dropped = drop_covered(grids)
+    if dropped:                                                        # 去掉了段，交界要按剩下的重算（join 只用小节线算，不碰音频）
+        joins = [join(a, b) for a, b in zip(grids[:-1], grids[1:])]
+        for x in dropped:
+            print("  去掉：" + x)
     print("全曲速度走势（8 秒窗、每 2 秒）：" + " ".join(f"{x:.0f}:{b:.1f}" for x, b in w))
     print("稳定的段：" + "；".join(f"{r['from_s']:.0f}–{r['to_s']:.0f} s ≈ {r['bpm']:.2f}" for r in runs))
     for k, g in enumerate(grids, 1):

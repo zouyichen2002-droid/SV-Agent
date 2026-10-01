@@ -373,15 +373,27 @@ def step_template(r: Run, voice: dict, stems: dict, tm: pathlib.Path) -> pathlib
     d = r.P / "模板"
     d.mkdir(exist_ok=True)
     out = d / f"模板_{r.name}.svp"
+    tempo = json.loads(tm.read_text(encoding="utf-8"))["map"]["tempo"]
     if out.exists():
-        r.note("模板", "跳过", "已经有了")
-        return out
+        # 10-01《调查中》：模板那一步自检不过时文件已经写出来了，接着跑把它当成「已经有了」，用的还是出错前的速度表
+        # → 模板的速度表得是现在这张，不是就挪开重做（不删）
+        if json.loads(out.read_text(encoding="utf-8"))["time"]["tempo"] == tempo:
+            r.note("模板", "跳过", "已经有了（速度表和现在的一样）")
+            return out
+        old = out.with_name(f"{out.stem}_弃用_速度表是旧的_{time.strftime('%m%d%H%M%S')}.svp")
+        out.rename(old)
+        r.note("模板", "开始", f"原来的模板速度表是旧的，挪成 {old.name}、重做")
     cfg = {"base": voice["base"], "base_voice_track": voice["voice_track"], "base_accomp_track": voice["accomp_track"],
            "base_ref_track": voice["ref_track"], "voice_track_name": voice["voice_track"], "ref_name": "原曲人声（分离，参考，静音）",
            "accomp": stems["伴奏"], "ref_vocal": stems["人声"], "tempo_map": str(tm), "out": str(out)}
     (d / "template.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
     r.note("模板", "开始", f"声库 {voice['voice_track']}；速度表用量出来的")
-    r.run("模板", [r.cfg["python"], r.spikes / "m1-01-voice-to-midi" / "make_template.py", d / "template.json"], cwd=r.spikes / "m1-01-voice-to-midi")
+    try:
+        r.run("模板", [r.cfg["python"], r.spikes / "m1-01-voice-to-midi" / "make_template.py", d / "template.json"], cwd=r.spikes / "m1-01-voice-to-midi")
+    except StepFailed:
+        if out.exists():                                         # 自检不过的模板挪开（不删），接着跑时不会被当成「已经有了」
+            out.rename(out.with_name(f"{out.stem}_弃用_自检不过_{time.strftime('%m%d%H%M%S')}.svp"))
+        raise
     if not out.exists():
         raise StepFailed("模板", f"没出 {out.name}")
     r.note("模板", "完成", out.name)
