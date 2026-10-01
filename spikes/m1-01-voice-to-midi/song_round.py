@@ -29,7 +29,9 @@ for sub in ("m1-02-harmony", "m1-03-lyrics", "m5-00-beat-grid"):
     sys.path.insert(0, str(HERE.parent / sub))
 sys.path.insert(0, str(HERE))
 import beat_grid as BG                                          # noqa: E402
+import clean_lyrics as LC                                       # noqa: E402
 import compare_notes as C                                       # noqa: E402
+import cover_rules as CR                                        # noqa: E402
 import eval_lyrics as E                                         # noqa: E402
 import grid_check as GC                                         # noqa: E402
 import pick_octave as P                                         # noqa: E402
@@ -107,6 +109,15 @@ def quantize_on_map(notes: list[tuple], tempo: list[dict], metered: list[tuple[f
             a["q_off_s"] = b["q_on_s"]
             a["flags"].append("结尾截到下一个音")
     return out, bias
+
+
+def bpm_at(tempo: list[dict], s: float) -> float:
+    """速度表在第 s 秒用的是哪个速度。"""
+    cur = tempo[0]["bpm"]
+    for m in sorted(tempo, key=lambda x: x["position"]):
+        if BG.blick_to_seconds(m["position"], tempo) <= s + 1e-6:
+            cur = m["bpm"]
+    return float(cur)
 
 
 def blicks_of(r: dict, tempo: list[dict]) -> tuple[int, int]:
@@ -242,17 +253,36 @@ def main(cfg_path: str) -> int:
         return 1
     notes0, n_frag = merge_fragments(sorted(E.load(cfg["v2m_mid"])))
     print(f"GAME 的碎片（短于 {FRAG * 1000:.0f} ms、紧贴同音高）并掉 {n_frag} 个")
+    rule_log: dict[str, list] = {}
     if cfg.get("lyrics"):
         chars, pys = E.text_pinyin(cfg["lyrics"])
         fails = RL.selftest(chars, pys)
         if fails:
             print("修歌词的自检不过：", fails)
             return 1
+        lyr_used = cfg["lyrics"]
+        if cfg.get("rules_0930"):                                # 09-30 新规矩 1：和听写几乎对不上的行整行不放
+            fails = CR.selftest()
+            if fails:
+                print("新规矩的自检不过：", fails)
+                return 1
+            lines = LC.clean_lines(open(cfg["lyrics"], encoding="utf-8").read())
+            rates = CR.line_match(lines, RL.A.align(pys, [n[3] for n in notes0], [n[1] for n in notes0]))
+            keep, drop = CR.drop_unsung(lines, rates)
+            starts = np.cumsum([0] + [len(ln) for ln in lines])
+            chars = [ch for li in keep for ch in chars[starts[li]:starts[li + 1]]]
+            pys = [p for li in keep for p in pys[starts[li]:starts[li + 1]]]
+            rule_log["拿掉的行"] = [{"行": li + 1, "字数": len(lines[li]), "对上": round(rates[li], 2)} for li in drop]
+            rnd_dir.mkdir(parents=True, exist_ok=True)
+            lyr_used = rnd_dir / "歌词_放进主唱的行.txt"
+            lyr_used.write_text("\n".join(lines[li] for li in keep) + "\n", encoding="utf-8")
+            print(f"和听写对不上（对上的字不到 {CR.LINE_MIN_MATCH:.0%}）、整行不放的：{len(drop)} 行 —— "
+                  + "；".join(f"第 {d['行']} 行（{d['字数']} 字）" for d in rule_log["拿掉的行"]))
         fixed, log = RL.repair(notes0, chars, pys)
         acts = {}
         for x in log:
             acts[x["动作"]] = acts.get(x["动作"], 0) + 1
-        before_lyr, after_lyr = E.evaluate(notes0, cfg["lyrics"]), E.evaluate(fixed, cfg["lyrics"])
+        before_lyr, after_lyr = E.evaluate(notes0, cfg["lyrics"]), E.evaluate(fixed, str(lyr_used))
         for dct in (before_lyr, after_lyr):                      # evaluate 顺手拿《傍晚》的终稿比 —— 对别的歌没意义
             dct.pop("对终稿", None)
         diff = RL.sung_differently(notes0, chars, pys, log)
@@ -269,6 +299,11 @@ def main(cfg_path: str) -> int:
     changed = [k for k in range(len(fixed)) if new[k] != ps[k]]
     doubled = sum(1 for o in other if o)
     print(f"挑八度：录音里两个八度一起唱的音 {doubled} 个，改了八度的 {len(changed)} 个")
+    if cfg.get("rules_0930"):                                    # 09-30 新规矩 2、3：同音高的接续（长音截两段写韵母）、念唱拉平
+        picked, rule_log["同音高的接续"] = CR.same_pitch(picked)
+        picked, rule_log["念唱"] = CR.chant(picked, lambda s: 60.0 / bpm_at(tempo, s))
+        for k in ("同音高的接续", "念唱"):
+            print(f"{k}：{len(rule_log[k])} 处" + "".join(f"\n    {x}" for x in rule_log[k]))
 
     raw_rows = [{"i": i, "lyric": n[3], "pitch": int(round(n[2] / 100)), "cents": float(n[2]), "on_s": n[0], "off_s": n[0] + n[1],
                  "q_on_s": n[0], "q_off_s": n[0] + n[1], "k16": None, "dur16": None, "flags": []}
@@ -311,7 +346,7 @@ def main(cfg_path: str) -> int:
             f"{r['from_s']:.0f}:{r['phase_ms']:+.0f}" if r["locked"] else f"{r['from_s']:.0f}:·" for r in seg))
     res = {"config": cfg, "notes_v2m": len(notes0), "lyrics_chars": len(chars), "repair_actions": acts, "repair_log": log,
            "lyrics_before": before_lyr, "lyrics_after": after_lyr, "sung_differently": diff,
-           "octave": {"doubled_notes": doubled, "changed": len(changed), "why": why},
+           "octave": {"doubled_notes": doubled, "changed": len(changed), "why": why}, "rules_0930": rule_log,
            "snap": {"bias_beats_x1000": round(bias * 1000, 1), "flags": flags, "shift_ms_median": float(np.median(shifts)),
                     "shift_ms_max": float(shifts.max())}, "rows": rows, "grid_check": tabs}
     (rnd_dir / f"{cfg['name']}_扒谱_{cfg['round']}.json").write_text(
