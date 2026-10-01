@@ -60,6 +60,24 @@ def stable_runs(w: list[tuple[float, float]]) -> list[dict]:
     return [{"from_s": r[0][0], "to_s": r[-1][0] + 8.0, "bpm": float(np.median([v for _, v in r]))} for r in runs]
 
 
+MERGE_BPM = 0.1
+
+
+def merge_runs(runs: list[dict]) -> list[dict]:
+    """相邻两段速度差不到 0.1 BPM、时间上又重叠 → 并成一段。窗是 8 秒、每 2 秒一个，中间一个窗抖一下就会把一段断成两段，
+    断开的两段在时间上是重叠的（《天星问》整首 77.0，被 6 s 处一个 124 和 26–28 s 的 76.5 断成三段，每段各找各的「1」、
+    交界接不上，组装出 1212 / -14 BPM）。真换速度的（《潮声回响》82 → 86）差得远、不并。"""
+    out: list[dict] = []
+    for r in runs:
+        if out and abs(r["bpm"] - out[-1]["bpm"]) <= MERGE_BPM and r["from_s"] <= out[-1]["to_s"]:
+            a = out[-1]
+            la, lr = a["to_s"] - a["from_s"], r["to_s"] - r["from_s"]
+            out[-1] = {"from_s": a["from_s"], "to_s": max(a["to_s"], r["to_s"]), "bpm": (a["bpm"] * la + r["bpm"] * lr) / (la + lr)}
+        else:
+            out.append(dict(r))
+    return out
+
+
 class Features:
     """一小节 16 个十六分里找「1」要用的：和声部分的色度（换和弦）、打击部分的低频起音（底鼓）。"""
 
@@ -213,6 +231,14 @@ def beat_times(tempo: list[dict], dur: float) -> np.ndarray:
 
 def selftest() -> list[str]:
     fails = []
+    # 相邻、重叠、速度一样的几段并成一段；真换速度的、不重叠的不并
+    got = merge_runs([{"from_s": 12, "to_s": 34, "bpm": 76.97}, {"from_s": 30, "to_s": 112, "bpm": 77.0}, {"from_s": 108, "to_s": 224, "bpm": 77.0}])
+    if len(got) != 1 or got[0]["from_s"] != 12 or got[0]["to_s"] != 224 or abs(got[0]["bpm"] - 77.0) > 0.01:
+        fails.append(f"断成三段的同一个速度没并起来：{got}")
+    for runs, why in (([{"from_s": 0, "to_s": 40, "bpm": 82.0}, {"from_s": 38, "to_s": 90, "bpm": 86.0}], "真换速度的"),
+                      ([{"from_s": 0, "to_s": 40, "bpm": 120.0}, {"from_s": 44, "to_s": 90, "bpm": 120.05}], "不重叠的")):
+        if len(merge_runs(runs)) != 2:
+            fails.append(f"{why}被并成了一段")
     rng = np.random.default_rng(21)
     sr = 22050
     dur = 100.0
@@ -299,9 +325,13 @@ def main(cfg_path: str, *flags: str) -> int:
         print("（--reuse：速度走势、稳定的段、每段的速度和小节线、交界用上次的 tempo_map.json，只重新组装速度表、重做核对和试听）")
     else:
         feat = Features(harm, perc, SR)
-        center = cfg.get("bpm_center", 86.0)
-        w = walk(curves, dur, center * 0.7, center * 1.3)
-        runs = stable_runs(w)
+        if "--reuse-walk" in flags and prev_path.exists():
+            w = [tuple(x) for x in json.loads(prev_path.read_text(encoding="utf-8"))["walk"]]
+            print("（--reuse-walk：速度走势用上次的 tempo_map.json；稳定的段、每段的速度和小节线、交界都重算）")
+        else:
+            center = cfg.get("bpm_center", 86.0)
+            w = walk(curves, dur, center * 0.7, center * 1.3)
+        runs = merge_runs(stable_runs(w))
         grids = [extend(curves, section_grid(curves, feat, r["from_s"], r["to_s"], r["bpm"]), dur) for r in runs]
         joins = [join(a, b) for a, b in zip(grids[:-1], grids[1:])]
     print("全曲速度走势（8 秒窗、每 2 秒）：" + " ".join(f"{x:.0f}:{b:.1f}" for x, b in w))
