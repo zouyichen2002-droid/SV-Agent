@@ -16,6 +16,7 @@ import { constants as osConstants, setPriority } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { projectDirOf, readProject, writeProject } from '../sv-project/index.js'
 import { nextVersionId, readManifest, sealVersion, writeManifest } from '../sv-artifact/index.js'
+import { coverActions, recordUse } from '../sv-memory/index.js'
 
 export const name = 'sv-cover'
 export const inject = ['tools', 'jobs', 'sandbox', 'sandboxPolicy']
@@ -144,6 +145,7 @@ export function apply(ctx, config) {
   const PYTHON = need('python')
   const WORKER = need('worker')
   const useSandbox = config.sandbox !== false
+  const MEMORY = typeof config.memory === 'string' && isAbsolute(config.memory) ? resolve(config.memory) : null   // sv-memory 的记忆库（阶段 6）
   const llama = config.makeLlama ? config.makeLlama(config.llama) : makeLlama(config.llama)   // makeLlama：自检时换成假的
 
   const recent = new Map()          // 会话 id → 最近几条用户消息的文字
@@ -206,7 +208,19 @@ export function apply(ctx, config) {
 
       // 歌词：从创作者最近的消息里原样取（不让模型重抄）
       const useLyrics = args?.use_lyrics !== false
-      const octavePick = args?.octave_pick !== false              // 创作者 10-01 定：加开关、默认开着
+      let octavePick = args?.octave_pick !== false                // 创作者 10-01 定：加开关、默认开着
+      // 记忆里生效的偏好（阶段 6）：Agent 这次没说挑不挑 → 照偏好；这次说了、和偏好不一样 → 照这次的（PRD §6.2：当前明确指令优先），只提一句
+      const used = []
+      let prefNote = ''
+      const pref = MEMORY ? coverActions(MEMORY, dir).find((a) => a.key === 'octave_pick') : undefined
+      if (pref && (typeof args?.octave_pick !== 'boolean' || args.octave_pick === pref.value)) {
+        // 没说 → 照偏好；照着偏好说的（模型在上下文里看到了这条）→ 也算用了这条（10-01：不然交付记录里漏掉）
+        octavePick = pref.value
+        used.push(pref)
+        prefNote = `用了偏好 ${pref.label}`
+      } else if (pref && args.octave_pick !== pref.value) {
+        prefNote = `这次照创作者现在说的${args.octave_pick ? '挑' : '不挑'}八度（和偏好 ${pref.label} 不一样；偏好没改）`
+      }
       let lyricNote = '这一版不用歌词，只靠听写'
       if (useLyrics) {
         const text = findLyrics(recent.get(session.id) ?? [])
@@ -258,7 +272,7 @@ export function apply(ctx, config) {
             const outFile = join(dir, '日志', `cover_${id}.out`)
             mkdirSync(join(dir, '日志'), { recursive: true })
             let argv = [PYTHON, WORKER, dir, '--round', id, '--source', source, ...(useLyrics ? [] : ['--lyrics', 'none']),
-              ...(octavePick ? [] : ['--octave-pick', 'off'])]
+              ...(octavePick ? [] : ['--octave-pick', 'off']), ...(prefNote ? ['--prefs-used', prefNote] : [])]
             if (useSandbox) {
               const policy = ctx.sandboxPolicy.resolve({ session })
               if (policy.mode !== 'danger-full-access') argv = (await ctx.sandbox.confine(argv, policy)).argv
@@ -280,6 +294,9 @@ export function apply(ctx, config) {
               const m2 = readManifest(STORE, dir)
               const files = sealVersion(dir, m2, id, '翻唱跑完自动交付')
               writeManifest(STORE, dir, m2)
+              for (const u of used) {                               // PRD R10：记下这一版实际用了哪条偏好
+                try { recordUse(u.file, u.id, { 歌: basename(dir), 版本: id, 怎么用的: u.value ? '挑八度' : '不挑八度' }) } catch { /* 记不上不影响交付 */ }
+              }
               const p = readProject(dir)
               if (p && !p.error) {
                 p.status = `${id} 翻唱出来了（${stamp()}），等创作者听`
@@ -311,7 +328,7 @@ export function apply(ctx, config) {
         },
       })
       running.set(dir, jobId)
-      return `开始了：${label}（后台任务 ${jobId}${resume ? `；接着上次没跑完的 ${id}，做完的步跳过` : ''}）。${lyricNote}${octavePick ? '' : '；这一版不挑八度'}。来源：${source}。约 15–25 分钟（分离约 2 分钟、找拍子十几分钟）；`
+      return `开始了：${label}（后台任务 ${jobId}${resume ? `；接着上次没跑完的 ${id}，做完的步跳过` : ''}）。${lyricNote}${octavePick ? '' : '；这一版不挑八度'}${prefNote ? `（${prefNote}）` : ''}。来源：${source}。约 15–25 分钟（分离约 2 分钟、找拍子十几分钟）；`
         + '这段时间本地大模型会让出来，聊不了天；跑完自动载回，你会被唤醒、再告诉创作者结果。现在简短告诉创作者，然后结束这一轮。'
     },
   })

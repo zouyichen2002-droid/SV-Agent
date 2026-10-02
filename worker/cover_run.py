@@ -435,7 +435,7 @@ def step_round(r: Run, voice: dict, tpl, stems, lead, lyrics, mid, bp, tm, lang:
     return stats
 
 
-def write_readme(r: Run, source: str, lyrics, stats: dict, lang: str = "zh", octave_pick: bool = True) -> None:
+def write_readme(r: Run, source: str, lyrics, stats: dict, lang: str = "zh", octave_pick: bool = True, prefs_used: str = "") -> None:
     lyric_text = "创作者给的（素材/歌词_原文.txt → 歌词_要唱的字.txt）" if lyrics else "没给，只靠听写"
     if lyrics and lang != "zh":
         lyric_text += "，Vocal2Midi 拿它对听写（修字是按中文拼音的，这首没修）"
@@ -444,6 +444,7 @@ def write_readme(r: Run, source: str, lyrics, stats: dict, lang: str = "zh", oct
              *([f"- 语言：{LANG_NAMES[lang]}（星尘用 SV 的跨语种：这条轨和每个音都设成{LANG_NAMES[lang]}）"] if lang != "zh" else []),
              ("- 挑八度：开（默认；想关就跟 Agent 说「这首不挑八度」）" if octave_pick
               else "- 挑八度：关（这一版音高全照 Vocal2Midi 扒的，没按《傍晚》学来的规矩改八度）"),
+             *([f"- 记忆：{prefs_used}"] if prefs_used else []),
              f"- 工程：`{pathlib.Path(stats['工程']).name}`（打开就放伴奏和扒谱；原曲主唱那条静音，点开对照）",
              f"- 扒出 {stats.get('扒出的音')} 个音；改了 {stats.get('改八度')} 个八度", "",
              "听的时候：觉得哪里不对就直接在 SV 里改、存盘 —— 插件会自动备份你改的样子，下一版照你改的学。"]
@@ -461,6 +462,7 @@ def main() -> int:
     ap.add_argument("--language", default="auto", choices=["auto", "zh", "en", "ja"], help="唱的语言；auto = 按歌词认")
     ap.add_argument("--octave-pick", default="on", choices=["on", "off"],
                     help="挑八度（创作者 10-01 定：加开关、默认开）；off = 音高全照 Vocal2Midi 扒的")
+    ap.add_argument("--prefs-used", default="", help="这一版用了记忆里的哪条偏好（sv-cover 插件传，一句话，写进 说明.md）")
     ap.add_argument("--config", default=str(HERE / "cover_config.json"))
     a = ap.parse_args()
     low_priority()
@@ -497,7 +499,9 @@ def main() -> int:
         stats = step_round(r, voice, tpl, stems, lead, lyrics, mid, bp, tm, lang, octave)
         stats["语言"] = LANG_NAMES[lang]
         stats["挑八度"] = "开" if octave else "关"
-        write_readme(r, a.source, lyrics, stats, lang, octave)
+        if a.prefs_used:
+            stats["用了的偏好"] = a.prefs_used
+        write_readme(r, a.source, lyrics, stats, lang, octave, a.prefs_used)
     except StepFailed as e:
         r.note(e.step, "失败", e.why)
         summary = {"结果": "失败", "步": e.step, "原因": e.why, "各步": r.steps}

@@ -1,0 +1,9 @@
+{
+  "name": "@sv-agent/dsh-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SV-Agent 的记忆插件：创作者的反馈（原话）、偏好（他点头才生效）、历史",
+  "exports": { ".": "./index.js" },
+  "scripts": { "test": "node test.mjs" }
+}

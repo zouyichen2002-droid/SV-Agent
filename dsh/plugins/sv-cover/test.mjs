@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply, findLyrics } from './index.js'
 import { readManifest } from '../sv-artifact/index.js'
+import { addEntry, readMem, setState, songFile, writeMem } from '../sv-memory/index.js'
 
 const base = mkdtempSync(join(tmpdir(), 'sv-cover-test-'))
 const root = join(base, 'ws')
@@ -163,6 +164,63 @@ try {
     const id = readManifest(store, P).versions.at(-1).id
     const args = JSON.parse(readFileSync(join(P, '日志', `args_${id}.json`), 'utf8'))
     assert.deepEqual(args.slice(-2), ['--octave-pick', 'off'])
+  })
+
+  // ---- 阶段 6：记忆里生效的偏好（另起一个带记忆库的插件实例、另一首歌）----
+  const memStore = join(base, 'memory')
+  const Q = join(root, '记忆歌')
+  mkdirSync(join(Q, '素材'), { recursive: true })
+  writeFileSync(join(Q, 'sv-project.json'), JSON.stringify({ schema: 'sv-agent/project@1', name: '记忆歌', kind: 'cover', status: '刚建', notes: [] }))
+  writeFileSync(join(Q, '素材', '歌词_原文.txt'), '一句\n')
+  const mem = readMem(songFile(memStore, Q))
+  const pe = addEntry(mem, 's', { 类: '偏好', 原话: '这首不挑八度', 理解: '这首翻唱不挑八度', 来源: { 时间: 't', 怎么来的: '测试' }, 范围: '这首歌', 强度: '尽量', 状态: '待确认', 动作: { octave_pick: false } })
+  setState(mem, pe.id, '生效', '测试')
+  writeMem(songFile(memStore, Q), mem)
+  const tools2 = new Map()
+  const listeners2 = new Map()
+  const jobs2 = []
+  apply({ ...ctx, tools: { register: (t) => tools2.set(t.name, t) }, on: (n, fn) => listeners2.set(n, fn),
+    jobs: { start: (spec) => { const jid = `mem-${jobs2.length + 1}`; const hooks = spec.run({ id: jid, append: () => {}, updateProgress: () => {} }); jobs2.push({ id: jid, spec, hooks }); return jid } } },
+  { root, store, python: process.execPath, worker: FAKE, sandbox: true, makeLlama: fakeLlama, memory: memStore })
+  const s2 = { id: 's2', header: { cwd: Q } }
+  const run2 = (args) => tools2.get('cover_run').execute(args, { agent: { session: s2 } })
+  const end2 = () => listeners2.get('session/event')(s2, { type: 'turn/end', data: {} })
+
+  await check('记忆：这首记着「不挑八度」、这次没说 → 照偏好不挑；交付后偏好记下「用过」', async () => {
+    const out = await run2({ source: OK })
+    assert.match(out, /用了偏好 本首 s1/)
+    end2()
+    const outcome = await jobs2[0].hooks.done
+    assert.equal(outcome.status, 'completed', JSON.stringify(outcome))
+    const args = JSON.parse(readFileSync(join(Q, '日志', 'args_r01.json'), 'utf8'))
+    assert.ok(args.includes('--octave-pick') && args[args.indexOf('--octave-pick') + 1] === 'off', args.join(' '))
+    assert.match(args[args.indexOf('--prefs-used') + 1], /用了偏好 本首 s1/)
+    const used = readMem(songFile(memStore, Q)).entries.find((x) => x.id === pe.id).用过
+    assert.equal(used.length, 1)
+    assert.equal(used[0].版本, 'r01')
+  })
+
+  await check('记忆：模型照着偏好自己传了 octave_pick false → 也算用了这条（记「用过」、说明里写上）', async () => {
+    const before = readMem(songFile(memStore, Q)).entries.find((x) => x.id === pe.id).用过.length
+    const out = await run2({ source: OK, octave_pick: false })
+    assert.match(out, /用了偏好 本首 s1/)
+    end2()
+    await jobs2[1].hooks.done
+    const args = JSON.parse(readFileSync(join(Q, '日志', 'args_r02.json'), 'utf8'))
+    assert.match(args[args.indexOf('--prefs-used') + 1], /用了偏好/)
+    assert.equal(readMem(songFile(memStore, Q)).entries.find((x) => x.id === pe.id).用过.length, before + 1)
+  })
+
+  await check('记忆：这次明说要挑八度 → 照这次的（当前指令优先），偏好不动、不记「用过」', async () => {
+    const out = await run2({ source: OK, octave_pick: true })
+    assert.match(out, /这次照创作者现在说的挑八度/)
+    end2()
+    await jobs2[2].hooks.done
+    const args = JSON.parse(readFileSync(join(Q, '日志', 'args_r03.json'), 'utf8'))
+    assert.ok(!args.includes('--octave-pick'), args.join(' '))
+    const e = readMem(songFile(memStore, Q)).entries.find((x) => x.id === pe.id)
+    assert.equal(e.状态, '生效')
+    assert.equal(e.用过.length, 2, '前两次用过、这次没用')
   })
 } finally {
   try { dispose?.() } catch { /* 没有 */ }

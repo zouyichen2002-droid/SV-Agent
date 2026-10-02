@@ -133,10 +133,19 @@
         # 10-01 实测：Vocal2Midi 听写（Qwen3-ASR）写死了另起进程（multiprocessing），Windows 上走命名管道，DSH 沙箱不许开命名管道 → WinError 5。
         # 所以 Worker 不进沙箱：它是我们自己的固定流程（模型只给来源 / 用不用歌词，插件先校验），只往这首歌的项目文件夹里写；插件本身也不在沙箱里
         sandbox: false
+        memory: E:/sv-agent-data/memory   # 阶段 6：记忆里生效的「这首不挑八度」这类偏好，翻唱时自动用、记下用过
         llama:
           port: 8081
           start: [ 'C:/Program Files/Git/bin/bash.exe', 'E:/sv-agent-data/dsh/start-llama.sh' ]
           log: E:/sv-agent-data/dsh/llama-server.log
+# sv-memory（阶段 6）：创作者的反馈（原话）、偏好（他点头才生效）、历史。创作者 10-01 定：反馈自动记原话；偏好 Agent 提议、他点头才生效；
+# 以前说过的规矩和评价导进来、他过一遍。记忆库在工作区外面（Agent 的沙箱写不进去）；给人看的清单：<项目>\记忆.md、<store>\全局记忆.md
+    - id: sv-memory
+      name: E:/sv-bridge/dsh/plugins/sv-memory/index.js
+      config:
+        root: E:/sv-agent-workspace
+        store: E:/sv-agent-data/memory
+        artifacts: E:/sv-agent-data/snapshots
 # 选目录用网页里的浏览器（browse），不用原生对话框：本机 + Windows 时自动选 native，会在创作者桌面上弹 Windows 选文件夹窗口
 #（补丁不能改已有条目的插件名 → 关掉自动选择器、另插 browse 的两半：本机服务 + 网页界面；自动选择器原本就是挂这两条）
 - id: directory-picker
