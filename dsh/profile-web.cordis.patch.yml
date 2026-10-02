@@ -146,6 +146,16 @@
         root: E:/sv-agent-workspace
         store: E:/sv-agent-data/memory
         artifacts: E:/sv-agent-data/snapshots
+# sv-video（视频，10-01）：对话里给图和成品音频 → 后台跑 sv-bridge/worker/video_run.py → 项目的 视频\vNN 出 1080p 成片，剪映里出新草稿「SV-Agent_<歌名>_vNN」。
+# 创作者 10-01 定：先做歌词视频；只用他给的图；剪映草稿 + 一份成片；草稿只新建、不碰他已有的
+    - id: sv-video
+      name: E:/sv-bridge/dsh/plugins/sv-video/index.js
+      config:
+        root: E:/sv-agent-workspace
+        python: G:/miniconda/python.exe
+        worker: E:/sv-bridge/worker/video_run.py
+        drafts: G:/JianyingPro Drafts     # 剪映的草稿文件夹；插件定版本号、拦写用它，也传给 Worker（--drafts），只这一处
+        sandbox: false                    # 草稿文件夹在工作区外面，沙箱写不进去；Worker 是固定流程，参数插件先校验
 # 选目录用网页里的浏览器（browse），不用原生对话框：本机 + Windows 时自动选 native，会在创作者桌面上弹 Windows 选文件夹窗口
 #（补丁不能改已有条目的插件名 → 关掉自动选择器、另插 browse 的两半：本机服务 + 网页界面；自动选择器原本就是挂这两条）
 - id: directory-picker

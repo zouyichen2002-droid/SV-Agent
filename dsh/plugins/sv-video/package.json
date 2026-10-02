@@ -1,0 +1,9 @@
+{
+  "name": "@sv-agent/dsh-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SV-Agent 的歌词视频插件：对话里给图和成品音频，后台出 1080p 成片和剪映草稿，写进项目的 视频\\vNN",
+  "exports": { ".": "./index.js" },
+  "scripts": { "test": "node test.mjs" }
+}

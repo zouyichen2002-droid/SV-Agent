@@ -29,3 +29,24 @@ python cover_run.py <项目文件夹> --round rNN --source <链接 | 本地音�
 ## 测过的
 
 见 `docs/v3/s3-cover.md` §3：整首重跑《逃跑的天使》对 M1 r02；10-01 下午在 DSH 里翻你给的六首（4 中文、1 英文、1 日语）。
+
+## 歌词视频（v3 视频，10-01）
+
+`video_run.py`：翻唱出来的工程 + 你给的图 + 你混好的成品音频 → 1080p 成片（mp4）+ 剪映草稿。平时由 DSH 里的 `sv-video` 插件在后台调（不进沙箱：剪映的草稿文件夹在工作区外面）：
+
+```
+python video_run.py <项目文件夹> --version vNN --audio <成品音频> --image <图或视频> [--image …] [--svp <工程>] [--title …] [--credit …] [--fx 可爱|凌厉|平铺|弹跳|发光|浮现|逐字出现|竖排古风] [--side auto|left|right] [--drafts <剪映草稿文件夹>]
+```
+
+| 步 | 用什么 | 写到哪 | 大约 |
+|---|---|---|---|
+| 检查、素材 | 音频、图、工程、歌词都在；图和成品音频拷一份（剪映草稿指着这份） | `视频\vNN\素材\` | 1 秒 |
+| 逐字时间 | `lyric_timing.py`（vocal2midi 环境）：工程里每个音 → 对回歌词原文的字 | `视频\vNN\逐字时间.json` | 1 秒 |
+| 对齐 | `audio_offset.py`（numpy）：成品音频比工程晚几秒（伴奏两边共有，起音包络互相关 + 分段核对）→ 字幕平移 | 同上（平移前的另存 `_工程时间.json`） | 1 秒 |
+| 成片 | `lyric_video.py`（ffmpeg）：图（推近）或视频底片（循环铺满）+ 字幕 + 成品音频；字幕默认「可爱」，`--fx` 换别的（每个字单独动，排版自己算，`python lyric_fx.py --calibrate` 核对）；`--side` 指定字放哪边 | `视频\vNN\<歌名>_歌词视频_vNN.mp4` | 一首 3–4 分钟的歌约 1–2.5 分钟（libx264） |
+| 剪映草稿 | `jianying_draft.py`（video 环境，pyJianYingDraft）：整份草稿在内存里做完再写盘 | `<剪映草稿文件夹>\SV-Agent_<歌名>_vNN\` | 1 秒 |
+| 说明 | 用了哪个工程、对齐结果、要看一下的 | `视频\vNN\说明.md`（最后写：有它 = 这一版做完了） | — |
+
+- 进度一行一个 JSON 在 `日志\视频进度.jsonl`；总结在 `日志\视频_vNN.json`；每步的输出在 `日志\视频_vNN_<步>.log`
+- 自检：`python audio_offset.py --selftest`、`python lyric_fx.py --calibrate`（特效字幕每个字的位置）；用真歌测过的数字见 `docs/v3/s10-video.md` §3–5
+- 「可爱」（默认）用站酷快乐体，「凌厉」用马善政毛笔楷书（大字、竖排小字都是；日语用佑字肅；都在 `cover_config.json` 的 `fonts_dir`，不装进系统；每一版拷一份到 `视频\vNN\_fonts\`）；「凌厉」出片前把底图调一次（压暗、降饱和、暗角、颗粒，存 `视频\vNN\_底图\`）；拆行（`lyric_rows.py`）和字放哪边（`image_side.py`）成片和剪映草稿共用

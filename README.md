@@ -17,6 +17,8 @@
   加了英文、日语（按歌词自动认语言，星尘用 SV 跨语种唱）。10-01 在 DSH 里一句话一首翻了作者给的 6 首（4 中 1 英 1 日），结果见下面 —— 详见 [docs/v3/s3-cover.md](docs/v3/s3-cover.md)
 - **阶段 6 做完**：创作记忆 —— 作者评价某一版，Agent 原样记下原话；看出一条以后要照做的规矩先提议、作者点头才生效；翻唱时自动用（比如「这首不挑八度」），说明里写明用了哪条。
   以前说过的 22 条规矩、18 条评价已经导进去 —— 见 [docs/v3/s6-memory.md](docs/v3/s6-memory.md)（阶段 5 原来的例子「钢琴试听」作者定不用：直接开 SV 听）
+- **视频（阶段 10 提前，作者 10-01 定先做视频、原创后面再做）第一版做完**：歌词视频 —— 在那首歌的会话里说「做歌词视频」、给图和混好的成品音频，
+  后台 3–5 分钟出 1080p 成片（歌词逐字变色，时间从 SV 工程来；自动核对成品音频比工程晚几秒、字幕跟着平移）和一份剪映草稿（剪映里接着改）—— 见 [docs/v3/s10-video.md](docs/v3/s10-video.md)
 
 > 这是 v2（2026-09 清空重写）。v1 的代码在标签 `v1-archive`；第一个发布在标签 `v0.1.0`（那时只有《傍晚》一首）。需求见 [PRD.md](PRD.md)。
 
@@ -125,9 +127,9 @@ v3 的平台（DSH）在本机怎么搭：补丁、启动脚本和换机器重�
 | [PRD.md](PRD.md) | 产品需求（给作者本人看） |
 | [docs/m0/](docs/m0) | 可行性验证记录（SynthV / FL 工程读写、钢琴试听、发布入口等） |
 | [docs/m1/](docs/m1) | 翻唱链路的站末材料：五首歌、失败案例、成本 |
-| [docs/v3/](docs/v3) | v3 各阶段的笔记（阶段 0：原样跑通 DSH；阶段 1：Project 插件；阶段 2：Artifact 插件；阶段 3–4：Cover Skill 和六首；阶段 6：创作记忆） |
-| [dsh/](dsh) | DSH 本机配置的副本；我们自己写的 DSH 插件（[dsh/plugins/](dsh/plugins)：sv-project、sv-artifact、sv-cover、sv-memory）和技能说明（[dsh/skills/](dsh/skills)） |
-| [worker/](worker) | 翻唱的 Python Worker：一首歌 → SynthV 工程，一条命令 |
+| [docs/v3/](docs/v3) | v3 各阶段的笔记（阶段 0：原样跑通 DSH；阶段 1：Project 插件；阶段 2：Artifact 插件；阶段 3–4：Cover Skill 和六首；阶段 6：创作记忆；阶段 10 提前：歌词视频） |
+| [dsh/](dsh) | DSH 本机配置的副本；我们自己写的 DSH 插件（[dsh/plugins/](dsh/plugins)：sv-project、sv-artifact、sv-cover、sv-memory、sv-video）和技能说明（[dsh/skills/](dsh/skills)） |
+| [worker/](worker) | Python Worker：翻唱（一首歌 → SynthV 工程）、歌词视频（工程 + 图 + 成品音频 → 成片 + 剪映草稿），各一条命令 |
 | [spikes/m1-01-voice-to-midi/](spikes/m1-01-voice-to-midi) | 扒谱：各种做法的对比、两个裁判、Vocal2Midi、分离、补段、作者定的规矩、一版一版写 SynthV 工程 |
 | [spikes/m1-02-harmony/](spikes/m1-02-harmony) | 叠唱检测、挑八度、基线与回归检查 |
 | [spikes/m1-03-lyrics/](spikes/m1-03-lyrics) | 按作者给的歌词修歌词 |

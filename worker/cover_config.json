@@ -18,5 +18,8 @@
     }
   },
   "separation_threads": 8,
-  "basic_pitch_threads": 4
+  "basic_pitch_threads": 4,
+  "video_python": "E:/sv-agent-data/envs/video/Scripts/python.exe",
+  "jianying_drafts": "G:/JianyingPro Drafts",
+  "fonts_dir": "E:/sv-agent-data/fonts"
 }

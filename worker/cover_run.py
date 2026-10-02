@@ -46,8 +46,15 @@ class StepFailed(Exception):
 
 
 def low_priority() -> None:
-    if os.name == "nt":
-        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)   # BELOW_NORMAL
+    """把自己调成「低于正常」，起的子程序都跟着低。10-01 才发现原来那一行在 64 位 Python 上没生效：
+    不声明参数类型时 GetCurrentProcess 的伪句柄被截成 32 位 → SetPriorityClass 返回 0、优先级还是「正常」。"""
+    if os.name != "nt":
+        return
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetCurrentProcess.restype = ctypes.c_void_p
+    k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    if not k32.SetPriorityClass(k32.GetCurrentProcess(), 0x4000):          # BELOW_NORMAL_PRIORITY_CLASS
+        print(f"调不了优先级（错误 {ctypes.get_last_error()}），照常优先级跑", flush=True)
 
 
 def stamp() -> str:
