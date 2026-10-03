@@ -79,3 +79,40 @@ def phrase_rows(ln: dict, times: list[tuple[float, float]], lang: str) -> list[l
         i = min(pairs, key=lambda m: g(rows[m]))
         rows[i] += rows.pop(i + 1)
     return rows
+
+
+def _norm(text: str) -> str:
+    """比较用：小写、去掉空白和标点（「Ah」「ah,」「ah！」都算 ah）。"""
+    import re
+    return re.sub(r"[\s\W_]+", "", text.lower())
+
+
+def drop_words(timing: dict, words: list[str]) -> dict:
+    """不出字幕的词（10-02 创作者：「《怪物》成片的所有“ah”字幕都删除不播」）：单位的字（小写、去掉标点后）和 words 里的一样就拿掉；
+    一句的起止按剩下有时间的字重算；一句全拿掉了 → 记进「没出字幕的行」。返回删了什么：{"词": [...], "处": n, "句": [...], "整句没了": [...]}。"""
+    targets = {_norm(w) for w in words if _norm(w)}
+    report = {"词": sorted(targets), "处": 0, "句": [], "整句没了": []}
+    if not targets:
+        return report
+    keep = []
+    for ln in timing["行"]:
+        units = [u for u in ln["单位"] if _norm(u["文字"]) not in targets]
+        n = len(ln["单位"]) - len(units)
+        if n == 0:
+            keep.append(ln)
+            continue
+        report["处"] += n
+        report["句"].append(ln["行"])
+        timed = [u for u in units if u["开始"] is not None]
+        if not timed:
+            report["整句没了"].append(ln["行"])
+            timing["没出字幕的行"].append({"行": ln["行"], "文字": ln["文字"], "原因": "只剩不出字幕的词"})
+            continue
+        sep = " " if timing.get("语言") == "en" else ""
+        ln["单位"], ln["开始"], ln["结束"] = units, min(u["开始"] for u in timed), max(u["结束"] for u in timed)
+        ln["文字"] = sep.join(u["文字"] for u in units)
+        keep.append(ln)
+    timing["行"] = keep
+    timing["统计"]["出字幕的行"] = len(keep)
+    timing["不出字幕的词"] = report
+    return report

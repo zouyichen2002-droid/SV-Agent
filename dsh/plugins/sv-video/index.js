@@ -212,6 +212,7 @@ export function apply(ctx, config) {
         title: { type: 'string', description: '开头的标题，不填 = 《歌名》' },
         credit: { type: 'string', description: '标题下面那行小字（例如「翻唱：小鳄鱼aligator」）；创作者没说就不填、不放' },
         side: { type: 'string', enum: ['left', 'right'], description: '字放哪边：left / right；不填 = 自动（看画面哪边空）。创作者说了「字放左边 / 右边」才填' },
+        skip: { type: 'array', items: { type: 'string' }, description: '不出字幕的词（不分大小写、不管标点），比如创作者说「ah 都不要字幕」就填 ["ah"]；没说就不填' },
         fx: { type: 'string', enum: FX, description: '字幕样式：可爱（默认：快乐体、白字彩色描边带光、一句拆成几行错落或斜台阶，字放在图里空的一边）、凌厉（毛笔楷书大字砸进来、旁边竖排小字红白相间、红色刀痕、画面压暗，像 KING 那种文字 PV）、平铺（原来的整行逐字变色）、弹跳、发光、浮现、逐字出现、竖排古风（华文行楷竖排，给古风歌）；创作者没说就不填' },
       },
       required: ['audio', 'images'],
@@ -234,6 +235,8 @@ export function apply(ctx, config) {
       const id = nextVideoId(dir, DRAFTS)
       const title = optString(args, 'title')
       const credit = optString(args, 'credit')
+      const skip = Array.isArray(args?.skip) ? args.skip.map((w) => (typeof w === 'string' ? w.trim() : '')).filter(Boolean) : []
+      if (skip.some((w) => w.length > 20)) throw new Error('skip 里的词太长了（一个词最多 20 个字）')
       const side = optString(args, 'side') ?? 'auto'
       if (side !== 'auto' && !SIDES.has(side)) throw new Error(`side 只能是 left 或 right（不填 = 自动）：${side}`)
       const fx = optString(args, 'fx') ?? '可爱'                     // 创作者 10-02：「效果不错，把可爱设成默认样式」
@@ -261,7 +264,7 @@ export function apply(ctx, config) {
           const body = async () => {
             mkdirSync(join(dir, '日志'), { recursive: true })
             const outFile = join(dir, '日志', `video_${id}.out`)
-            let argv = [PYTHON, WORKER, dir, '--version', id, '--audio', audio, ...images.flatMap((p) => ['--image', p]), '--svp', svp, '--drafts', DRAFTS, '--fx', fx, '--side', side,
+            let argv = [PYTHON, WORKER, dir, '--version', id, '--audio', audio, ...images.flatMap((p) => ['--image', p]), '--svp', svp, '--drafts', DRAFTS, '--fx', fx, '--side', side, ...skip.flatMap((w) => ['--skip', w]),
               ...(title ? ['--title', title] : []), ...(credit ? ['--credit', credit] : [])]
             if (useSandbox) {
               const policy = ctx.sandboxPolicy.resolve({ session })
@@ -293,15 +296,24 @@ export function apply(ctx, config) {
               }
               const warn = Array.isArray(summary.提醒) && summary.提醒.length > 0 ? `要提醒创作者：${summary.提醒.join('；')}。` : ''
               const missing = summary.没出字幕的行?.length ? `没出字幕的行：第 ${summary.没出字幕的行.join('、')} 行（工程里没唱这几行）。` : ''
-              return { status: 'completed', result: `${label} 做好了（${Math.max(1, Math.round(summary.总秒 / 60))} 分钟）。成片：${summary.成片}；`
+              // 成片多长、后台用了多久分开写（10-02：Agent 把后台用时说成了成片多长，下一版又照抄上一版的数）
+              const length = summary.成片时长 ? `成片 ${summary.成片时长}（整首）` : '成片时长没量到'
+              return { status: 'completed', result: `${label} 做好了：${length}，后台用了 ${summary.后台用时 ?? `${Math.max(1, Math.round(summary.总秒 / 60))} 分钟`}（这是做的时间，不是成片多长）。成片：${summary.成片}；`
                 + `剪映草稿：「${draftName}」（创作者在剪映的草稿列表里打开就能改）；字幕 ${summary.字幕行} 行，时间从 ${summary.工程}；对齐：${summary.对齐}。`
                 + `${missing}${warn}说明在 ${join(dir, '视频', id, '说明.md')}；用 present 把成片和说明交给创作者。` }
             }
             // 没写总结就退出了：不是哪一步报错，是中途被结束了（任务管理器、taskkill）或者崩了 —— 直说，免得 Agent 一个个翻日志找报错
             //（10-01 DSH 里试：我在外面结束了渲染，结果只说「退出码 1」，模型翻了 4 个日志、上下文用到 73% 还在找）
-            const why = summary?.原因 ?? `Worker 中途退出了、没写总结（退出码 ${code}）：多半是被结束了或者崩了，不是哪一步报的错；输出在 ${outFile}`
+            // 0xC0000142（Windows：程序初始化失败）：Worker 一行都没跑到 —— 是 DSH 自己起不了子程序（10-02：启动 DSH 的那个后台窗口被关掉以后，
+            // DSH 还活着，但起的 Python 全都这样死；重开 DSH 就好），不是这首歌、也不是参数的问题，重试没用
+            const dllInit = code === 3221225794 || code === -1073741502
+            const why = summary?.原因 ?? (dllInit
+              ? `Worker 一启动就退出了（退出码 0xC0000142：Windows 程序初始化失败，一行都没跑到）：是 DSH 自己起不了子程序，要重开 DSH；不是这首歌或参数的问题，别重试，先告诉创作者`
+              : `Worker 中途退出了、没写总结（退出码 ${code}）：多半是被结束了或者崩了，不是哪一步报的错；输出在 ${outFile}`)
             const moved = await discardUnfinishedRetry(dir, id, `没跑完 ${summary?.步 ?? ''}`)
-            return { status: 'failed', detail: why, result: `${label} 没做完：${summary?.步 ?? ''} ${why}${moved ? `。没做完的改名留着：${moved}` : `。${join(dir, '视频', id)} 改不了名（文件还被占着），留着没动`}` }
+            const left = moved ? `。没做完的改名留着：${moved}`
+              : !existsSync(join(dir, '视频', id)) ? `。${id} 的文件夹还没建，什么都没留下` : `。${join(dir, '视频', id)} 改不了名（文件还被占着），留着没动`
+            return { status: 'failed', detail: why, result: `${label} 没做完：${summary?.步 ?? ''} ${why}${left}` }
           }
           const done = body()
             .catch((e) => ({ status: 'failed', detail: String(e?.message ?? e), result: `${label} 插件出错：${e?.message ?? e}` }))
@@ -320,7 +332,7 @@ export function apply(ctx, config) {
       running.set(dir, jobId)
       const svpRel = relative(dir, svp).startsWith('..') ? svp : relative(dir, svp)
       const nVid = images.filter((p) => VIDEO_EXT.has(extname(p).toLowerCase())).length
-      return `开始了：${label}（后台任务 ${jobId}）。画面 ${images.length} 个${nVid ? `（${nVid} 个是视频，循环铺满）` : ''}；${side === 'auto' ? '' : `字放${side === 'left' ? '左' : '右'}边；`}音频 ${basename(audio)}；字幕时间用工程 ${svpRel}${args?.svp ? '' : '（rNN 里最近改过的那份）'}；`
+      return `开始了：${label}（后台任务 ${jobId}）。画面 ${images.length} 个${nVid ? `（${nVid} 个是视频，循环铺满）` : ''}；${side === 'auto' ? '' : `字放${side === 'left' ? '左' : '右'}边；`}${skip.length ? `不出字幕：${skip.join('、')}；` : ''}音频 ${basename(audio)}；字幕时间用工程 ${svpRel}${args?.svp ? '' : '（rNN 里最近改过的那份）'}；`
         + `标题 ${title ?? `《${basename(dir)}》`}${credit ? `，署名「${credit}」` : '，不放署名'}；字幕样式「${fx}」。约 3–5 分钟；做好了你会被唤醒、再告诉创作者。现在简短告诉创作者，然后结束这一轮。`
     },
   })

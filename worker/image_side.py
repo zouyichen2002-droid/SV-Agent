@@ -2,11 +2,14 @@
 r"""字放图里哪一边（v3 视频，2026-10-02）：成片的「可爱」字幕（lyric_fx.py）和剪映草稿（jianying_draft.py）共用。
 
 图按成片的样子铺满 1920×1080（多的裁掉），缩成 192×108，比左右各 45% 的明暗变化（相邻像素差的平均）：变化小的那边空、放字。
+字也只放在量过的那 45% 里（text_area）。
 只用 Pillow + numpy（G:/miniconda 和 video 环境里都有）。
 """
 from __future__ import annotations
 
 W, H = 1920, 1080
+BAND = 86 / 192          # 左右各比这么宽（缩小后 192 列里的 86 列，约 45%）
+MARGIN = 60              # 字离画面左右边至少 60 像素
 
 
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}
@@ -38,7 +41,14 @@ def calm_side(image: str | None) -> str:
     x0, y0 = (im.width - W) // 2, (im.height - H) // 2
     a = np.asarray(im.crop((x0, y0, x0 + W, y0 + H)).resize((192, 108)), dtype=float)
     g = np.abs(np.diff(a, axis=1))[:-1, :] + np.abs(np.diff(a, axis=0))[:, :-1]
-    return "left" if g[:, :86].mean() <= g[:, 105:].mean() else "right"
+    n = round(192 * BAND)
+    return "left" if g[:, :n].mean() <= g[:, -n:].mean() else "right"
+
+
+def text_area(side: str) -> tuple[float, float]:
+    """这一边能放字的横向范围（像素）= calm_side 量过、判为空的那一截，再离画面边 MARGIN：左 60–860，右 1060–1860。
+    10-02《怪物》雨夜底片：原来字能伸到 ~980 像素，51 句里有 18 句（39 个字）右边那列小字压到了人物的手（手套最左在 ~905）。"""
+    return (MARGIN, W * BAND) if side == "left" else (W * (1 - BAND), W - MARGIN)
 
 
 def line_sides(lines: list[dict], images: list[str] | None, total: float | None) -> list[str]:

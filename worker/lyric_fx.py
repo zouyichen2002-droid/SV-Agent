@@ -32,7 +32,7 @@ from fontTools.ttLib import TTFont
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from lyric_video import FONTS, H, W, ass_header, esc, line_windows, title_events, ts  # noqa: E402
-from image_side import calm_side, line_sides  # noqa: E402,F401  字放哪边（剪映草稿也用同一份）
+from image_side import calm_side, line_sides, text_area  # noqa: E402,F401  字放哪边、放多宽（剪映草稿也用同一份）
 from lyric_rows import phrase_rows, unit_times  # noqa: E402  单位唱的时间、一句拆成几行（剪映草稿也用同一份）
 
 try:                               # 下载来的字体（不装进系统）：cover_config.json 的 fonts_dir
@@ -274,8 +274,9 @@ CUTE_SIZE = 120                                  # 普通行 120 号；三个字
 CUTE_BIG = 1.4
 CUTE_COLORS = ["&H4FA0F5&", "&HAA7BF4&", "&HF07CA0&", "&HF0A85A&"]   # 每句轮着换描边色：橙 #F5A04F、粉 #F47BAA、紫 #A07CF0、蓝 #5AA8F0
 CUTE_DRIFT = 16                                  # 整块每秒往右漂 16 像素
+CUTE_DRIFT_MAX = 100                             # 一句最多漂 100 像素（长句漂得慢一点）：漂的那段也得在放字的范围里
 CUTE_IN, CUTE_OUT = 0.25, 0.35                   # 滑进来 0.25 秒；滑出去 0.35 秒
-CUTE_AREA_W = 880                                # 字放在图里空的那一边：那一边 880 像素宽的地方
+CUTE_AREA_W = text_area("left")[1] - text_area("left")[0]   # 字放在图里空的那一边：800 像素宽（image_side.text_area；10-02 前是 880、而且整块可能伸出去）
 CUTE_AREA_H = 760                                # 整块最高 760 像素
 
 
@@ -283,6 +284,22 @@ def _jitter(seed: int) -> float:
     """固定的「随机」：同一句每次出来都一样（-1 … 1）。"""
     x = (seed * 1103515245 + 12345) & 0x7FFFFFFF
     return (x % 2001) / 1000.0 - 1.0
+
+
+def fit_area(items: list[dict], side: str, drift: float = 0.0) -> tuple[float, float]:
+    """整块放进这一边能放字的范围（image_side.text_area）：按整块的外框居中，不是按某个字居中；放不下就整块缩小。
+    10-02《怪物》雨夜底片：凌厉原来按大字居中，右边小字列多的句子整块往右伸出去，压到了人物的手。
+    drift：这一句里整块还要往右漂多远（可爱）。返回 (bx, f)：bx 加到每项的 x 上；f 是缩成几倍（各项的 x、y、size、w、h 已经乘过）。"""
+    x0, x1 = text_area(side)
+    lo = min(it["x"] - it["w"] / 2 for it in items)
+    hi = max(it["x"] + it["w"] / 2 for it in items)
+    f = min(1.0, (x1 - x0 - drift) / (hi - lo))
+    if f < 1.0:
+        for it in items:
+            for k_ in ("x", "y", "size", "w", "h"):
+                it[k_] *= f
+        lo, hi = lo * f, hi * f
+    return x0 + (x1 - x0 - drift - (hi - lo)) / 2 - lo, f
 
 
 def cute_layout(ln: dict, k: int, lang: str, family: str) -> list[dict]:
@@ -342,7 +359,7 @@ def cute_layout(ln: dict, k: int, lang: str, family: str) -> list[dict]:
 
 def cute_events(timing: dict, sides: list[str]) -> list[str]:
     """可爱：白字 + 彩色描边 + 一圈同色的柔光（后面一层只留描边、糊开）；每句换一种描边色、换一种排法。
-    唱到的字从左边 70 像素滑进来、由糊变清、从 86% 弹到原样（字先带一点描边色，0.3 秒变白）；整块一直慢慢往右漂；
+    唱到的字从左边 70 像素滑进来、由糊变清、从 86% 弹到原样（字先带一点描边色，0.3 秒变白）；整块一直慢慢往右漂（一句最多 100 像素）；
     这一句退场时每个字往左滑 160 像素、糊掉、淡出（参考里是带动态模糊滑出去）。sides：每句放左边还是右边。"""
     lang = timing["语言"]
     family = CUTE_FONT if lang == "zh" else FONTS.get(lang, "Microsoft YaHei")   # 快乐体没有假名、英文也一般 → 日英先用原来的字体
@@ -357,18 +374,19 @@ def cute_events(timing: dict, sides: list[str]) -> list[str]:
         tint = lerp(WHITE, color, 0.45)
         items = cute_layout(ln, k, lang, family)
         side = sides[k] if k < len(sides) else "left"
-        bx = (60 + CUTE_AREA_W / 2) if side == "left" else (W - 60 - CUTE_AREA_W / 2)
+        speed = min(CUTE_DRIFT, CUTE_DRIFT_MAX / (E - S))
+        bx, _ = fit_area(items, side, speed * (E - S))                 # 整块连同往右漂的那段都在这一边能放字的范围里
         by = H * 0.43 + 30 * _jitter(k * 17 + 3)
-        # 整块（连同这一句往右漂的距离）留在画面里：左右离边至少 50 像素，上 60、下 80
+        # 留在画面里（保险）：左右离边至少 50 像素，上 60、下 80
         left = bx + min(it["x"] - it["w"] / 2 for it in items)
-        right = bx + max(it["x"] + it["w"] / 2 for it in items) + CUTE_DRIFT * (E - S)
+        right = bx + max(it["x"] + it["w"] / 2 for it in items) + speed * (E - S)
         top = by + min(it["y"] - it["h"] / 2 for it in items)
         bottom = by + max(it["y"] + it["h"] / 2 for it in items)
         bx += max(0.0, 50 - left) - max(0.0, right - (W - 50))
         by += max(0.0, 60 - top) - max(0.0, bottom - (H - 80))
         times = unit_times(ln["单位"])
         n = len(items)
-        x = lambda t, it: bx + it["x"] + CUTE_DRIFT * (t - S)
+        x = lambda t, it: bx + it["x"] + speed * (t - S)
         for j, it in enumerate(items):
             a, b = times[it["i"]]
             t_in = min(max(S, a - 0.10), E - CUTE_OUT - 0.05)
@@ -405,7 +423,8 @@ SHARP_RED = "&H3B24E5&"                  # 红 #E5243B
 SHARP_BIG = 400                          # 大字最大字号（马善政的字框高 = 字号 × 1000 / 1373：400 号约 290 像素；第一版 330 不够大）
 SHARP_BIG_W = 900                        # 大字那一截最宽 900 像素
 SHARP_COL = 96                           # 竖排小字字号（第一版 78 太小）
-SHARP_AREA_W, SHARP_AREA_H = 880, 900    # 整块最宽、最高（10-02《怪物》：1000 宽时右边那列碰到画面中间的人物 → 和「可爱」一样 880）
+SHARP_AREA_W, SHARP_AREA_H = CUTE_AREA_W, 900    # 整块最宽、最高：和「可爱」一样放在 image_side.text_area 里（800 宽）
+# （10-02《怪物》：1000 宽时右边那列碰到人物 → 880；换雨夜底片后发现整块是按大字居中的、会伸出 880 → 改成按外框放进 text_area）
 # 底图：压暗、加一点对比、降饱和、暗角、颗粒 —— 出片前对每张图只做一次（lyric_video.py）：颗粒固定在图上、跟着推近走，
 # 编码器能预测（10-02 第一版每一帧现加会变的颗粒：25 秒的样片 305 MB）
 SHARP_GRADE = "eq=brightness=-0.14:contrast=1.08:saturation=0.5,vignette=angle=PI/3.6,noise=alls=10:allf=u"
@@ -487,7 +506,14 @@ def sharp_events(timing: dict, sides: list[str]) -> list[str]:
         lay = sharp_layout(ln, lang)
         items = lay["items"]
         side = sides[k] if k < len(sides) else "left"
-        bx = (60 + SHARP_AREA_W / 2) if side == "left" else (W - 60 - SHARP_AREA_W / 2)
+        bx, f = fit_area(items, side)                                   # 按整块外框放进这一边能放字的范围
+        x0_, y0_, x1_, y1_ = (v * f for v in lay["slash"])
+        a0, a1 = (v - bx for v in text_area(side))                      # 刀痕两头伸出大字 60 像素：也别伸出放字的范围（沿着刀痕截短，角度不变）
+        if x0_ < a0:
+            y0_, x0_ = y0_ + (y1_ - y0_) * (a0 - x0_) / (x1_ - x0_), a0
+        if x1_ > a1:
+            y1_, x1_ = y1_ - (y1_ - y0_) * (x1_ - a1) / (x1_ - x0_), a1
+        lay["slash"] = (x0_, y0_, x1_, y1_)
         by = H * 0.46
         left = bx + min(it["x"] - it["w"] / 2 for it in items)
         right = bx + max(it["x"] + it["w"] / 2 for it in items)
@@ -501,7 +527,8 @@ def sharp_events(timing: dict, sides: list[str]) -> list[str]:
             t0 = min(max(S, a - 0.03), E - 0.2)
             x, y = bx + it["x"], by + it["y"]
             bold = 0 if it["font"] in (SHARP_BRUSH, SHARP_SMALL, SHARP_BRUSH_JA) else 1
-            look = (f"\\an5\\fn{it['font']}\\b{bold}\\fs{it['size']:.1f}" + (f"\\frz{it['rot']:.0f}" if it.get("rot") else "") + f"\\1c{it['color']}\\3c{DARK}"
+            # \fsp0：排版按不加字距算的（FX 样式默认字距 2 —— 多字的词 libass 会排宽，10-02 放字范围检查查出来的）
+            look = (f"\\an5\\fn{it['font']}\\b{bold}\\fs{it['size']:.1f}\\fsp0" + (f"\\frz{it['rot']:.0f}" if it.get("rot") else "") + f"\\1c{it['color']}\\3c{DARK}"
                     + (f"\\bord3\\4c{SHARP_RED}\\4a&H00&\\xshad7\\yshad5" if it["big"] else "\\bord2.5\\shad0"))
             text = esc(it["text"])
             land = 0.08
@@ -512,7 +539,7 @@ def sharp_events(timing: dict, sides: list[str]) -> list[str]:
                 ev += [dlg(2, t0 + land, t0 + land + 0.05, "FX", f"{look}\\pos({x + 7:.1f},{y - 5:.1f})", ""),
                        dlg(2, t0 + land + 0.05, t0 + land + 0.10, "FX", f"{look}\\pos({x - 5:.1f},{y + 4:.1f})", ""),
                        dlg(2, t0 + land + 0.10, E, "FX", f"{look}\\pos({x:.1f},{y:.1f})", ""),
-                       dlg(1, E, E + 0.07, "FX", f"\\an5\\fn{it['font']}\\b{bold}\\fs{it['size']:.1f}\\1c{SHARP_RED}\\bord0\\shad0\\alpha&H70&\\pos({x + 14:.1f},{y:.1f})", "")]
+                       dlg(1, E, E + 0.07, "FX", f"\\an5\\fn{it['font']}\\b{bold}\\fs{it['size']:.1f}\\fsp0\\1c{SHARP_RED}\\bord0\\shad0\\alpha&H70&\\pos({x + 14:.1f},{y:.1f})", "")]
             else:
                 ev.append(dlg(1, t0 + land, E, "FX", f"{look}\\pos({x:.1f},{y:.1f})", ""))
             out += [e + text for e in ev if e]

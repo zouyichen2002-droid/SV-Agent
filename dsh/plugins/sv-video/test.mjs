@@ -26,6 +26,7 @@ const argv = process.argv.slice(2)
 const dir = argv[0]
 const opt = (k) => argv[argv.indexOf(k) + 1]
 const v = opt('--version'), audio = opt('--audio')
+if (audio.endsWith('DLLINIT.wav')) process.exit(-1073741502)   // 0xC0000142：一行都没跑到就死（10-02 DSH 起不了子程序时就是这样）
 mkdirSync(join(dir, '日志'), { recursive: true })
 writeFileSync(join(dir, '日志', 'args_' + v + '.json'), JSON.stringify(argv))
 const note = (步, 状态, 说明 = '') => appendFileSync(join(dir, '日志', '视频进度.jsonl'), JSON.stringify({ 秒: 0, 版本: v, 步, 状态, 说明 }) + '\\n')
@@ -36,7 +37,7 @@ if (audio.endsWith('SLOW.wav')) { await new Promise((r) => setTimeout(r, 60000))
 if (audio.endsWith('CRASH.wav')) { process.exit(1) }
 note('对齐', '提醒', '成品前后和工程差得不一样')
 writeFileSync(join(dir, '视频', v, '说明.md'), 'fake')
-writeFileSync(join(dir, '日志', '视频_' + v + '.json'), JSON.stringify({ 结果: '完成', 总秒: 150, 版本: v, 成片: join(dir, '视频', v, basename(dir) + '_歌词视频_' + v + '.mp4'),
+writeFileSync(join(dir, '日志', '视频_' + v + '.json'), JSON.stringify({ 结果: '完成', 总秒: 150, 后台用时: '2 分 30 秒', 成片秒: 206.47, 成片时长: '3 分 26 秒', 版本: v, 成片: join(dir, '视频', v, basename(dir) + '_歌词视频_' + v + '.mp4'),
   工程: opt('--svp'), 字幕行: 50, 没出字幕的行: [7], 对齐: '成品比工程晚 1.50 秒，字幕整体跟着平移了', 提醒: ['第 90 秒起又差 -10.00 秒'] }))
 note('结束', '完成')
 `)
@@ -46,7 +47,7 @@ try {
   mkdirSync(drafts, { recursive: true })
   writeFileSync(join(P, 'sv-project.json'), JSON.stringify({ schema: 'sv-agent/project@1', name: '测试歌', kind: 'cover', status: '刚建', notes: [] }))
   const file = (n, body = 'x') => { const p = join(base, n); writeFileSync(p, body); return p }
-  const OK = file('成品.wav'), BAD = file('FAIL.wav'), SLOW = file('SLOW.wav'), CRASH = file('CRASH.wav')
+  const OK = file('成品.wav'), BAD = file('FAIL.wav'), SLOW = file('SLOW.wav'), CRASH = file('CRASH.wav'), DLLINIT = file('DLLINIT.wav')
   const IMG = file('封面.png')
   const IMGDIR = join(base, '图们')
   mkdirSync(IMGDIR)
@@ -130,7 +131,7 @@ try {
     await assert.rejects(run({ audio: OK, images: [IMG] }), /已经在做了/)
     const outcome = await jobs[0].hooks.done
     assert.equal(outcome.status, 'completed', JSON.stringify(outcome))
-    assert.match(outcome.result, /做好了（3 分钟）/)
+    assert.match(outcome.result, /做好了：成片 3 分 26 秒（整首），后台用了 2 分 30 秒（这是做的时间，不是成片多长）/, '成片多长、后台用了多久分开说')
     assert.match(outcome.result, /剪映草稿：「SV-Agent_测试歌_v06」/)
     assert.match(outcome.result, /对齐：成品比工程晚 1\.50 秒/)
     assert.match(outcome.result, /要提醒创作者：第 90 秒起又差/)
@@ -234,6 +235,17 @@ try {
     assert.match(outcome.result, /不是哪一步报的错/)
     assert.ok(readdirSync(join(P, '视频')).some((n) => n.startsWith(`弃用_${id}（没跑完`)), readdirSync(join(P, '视频')).join(','))
   })
+  await check('Worker 一启动就死（0xC0000142，DSH 起不了子程序）→ 结果直说「要重开 DSH、别重试」；文件夹没建就说没建，不说「改不了名」', async () => {
+    const out = await run({ audio: DLLINIT, images: [IMG] })
+    const id = out.match(/》(v\d+)/)[1]
+    const outcome = await jobs.at(-1).hooks.done
+    assert.equal(outcome.status, 'failed')
+    assert.match(outcome.result, /0xC0000142/)
+    assert.match(outcome.result, /要重开 DSH/)
+    assert.match(outcome.result, new RegExp(`${id} 的文件夹还没建`))
+    assert.doesNotMatch(outcome.result, /改不了名/)
+    assert.ok(!readdirSync(join(P, '视频')).some((n) => n.includes(id)), readdirSync(join(P, '视频')).join(','))
+  })
   await check('字放哪边：填 right 就原样交给 Worker；填错了 → 拒绝（不起任务）', async () => {
     const before = jobs.length
     await assert.rejects(run({ audio: OK, images: [IMG], side: '中间' }), /side 只能是 left 或 right/)
@@ -244,6 +256,16 @@ try {
     const id = out.match(/》(v\d+)/)[1]
     const args = JSON.parse(readFileSync(join(P, '日志', `args_${id}.json`), 'utf8'))
     assert.equal(args[args.indexOf('--side') + 1], 'right')
+  })
+  await check('不出字幕的词：skip 填了就一个个交给 Worker（--skip ah --skip oh）；没填就不传', async () => {
+    const out = await run({ audio: OK, images: [IMG], skip: ['ah', ' oh '] })
+    assert.match(out, /不出字幕：ah、oh/)
+    await jobs.at(-1).hooks.done
+    const id = out.match(/》(v\d+)/)[1]
+    const args = JSON.parse(readFileSync(join(P, '日志', `args_${id}.json`), 'utf8'))
+    const skips = args.flatMap((x, i) => (x === '--skip' ? [args[i + 1]] : []))
+    assert.deepEqual(skips, ['ah', 'oh'])
+    await assert.rejects(run({ audio: OK, images: [IMG], skip: ['x'.repeat(21)] }), /太长/)
   })
 } finally {
   rmSync(base, { recursive: true, force: true })   // 只删这次测试自己建的临时目录

@@ -101,6 +101,25 @@ def shift_timing(t: dict, d: float) -> dict:
     return t
 
 
+def mmss(sec: float) -> str:
+    sec = int(round(sec))
+    return f"{sec // 60} 分 {sec % 60} 秒"
+
+
+def media_seconds(ffmpeg: str, path: pathlib.Path, log: pathlib.Path) -> float | None:
+    """成片多长（秒）：用和 ffmpeg 同一个文件夹里的 ffprobe 量；输出写日志文件（不用管道接，见 README）。量不出来就 None。
+    10-02《怪物》：DSH 里交付 v02、v03 时 Agent 都写「（1080p，1 分 34 秒）」—— v02 那是后台用时、读起来像成片多长，v03 照抄了 v02
+    （v03 后台其实 1 分 25 秒）；成片是 3 分 26 秒 → 总结里两样都写明、分开叫。"""
+    probe = pathlib.Path(ffmpeg).with_name(pathlib.Path(ffmpeg).name.replace("ffmpeg", "ffprobe"))
+    try:
+        with open(log, "w", encoding="utf-8") as fh:
+            subprocess.run([str(probe), "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+                           stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, timeout=60, check=True)
+        return float(log.read_text(encoding="utf-8").strip().splitlines()[-1])
+    except Exception:
+        return None
+
+
 def copy_inputs(out: pathlib.Path, audio: pathlib.Path, images: list[pathlib.Path]) -> tuple[pathlib.Path, list[pathlib.Path]]:
     d = out / "素材"
     d.mkdir()
@@ -160,6 +179,7 @@ def main() -> int:
     ap.add_argument("--fx", default="可爱", help="字幕样式：可爱（默认，创作者 10-02 定）、凌厉、平铺（原来的整行卡拉 OK）、弹跳、发光、浮现、逐字出现、竖排古风（lyric_fx.py）")
     ap.add_argument("--drafts", default=None, help="剪映的草稿文件夹（插件传；不给用 cover_config.json 的 jianying_drafts）")
     ap.add_argument("--side", default="auto", choices=["auto", "left", "right"], help="字放哪边（可爱、凌厉）：auto = 图里空的那一边")
+    ap.add_argument("--skip", action="append", default=[], help="不出字幕的词（可以给几次；不分大小写、不管标点），比如 --skip ah")
     ap.add_argument("--config", default=str(HERE / "cover_config.json"))
     a = ap.parse_args()
     low_priority()
@@ -242,8 +262,18 @@ def main() -> int:
                 warnings.append(align["说明"])
             r.note("对齐", "提醒" if (not res["可信"] or res["对不上的段"]) else "完成", align["说明"])
 
+        dropped = None
+        if a.skip:                                     # 不出字幕的词：删掉以后成片、剪映都用这一份
+            sys.path.insert(0, str(HERE))
+            from lyric_rows import drop_words
+            shutil.copy2(timing, out / "逐字时间_删词前.json")
+            dropped = drop_words(t, a.skip)
+            timing.write_text(json.dumps(t, ensure_ascii=False, indent=1), encoding="utf-8")
+            r.note("删词", "完成", f"不出字幕：{'、'.join(dropped['词'])} —— {dropped['处']} 处、在第 {'、'.join(map(str, dropped['句']))} 句"
+                   + (f"；第 {'、'.join(map(str, dropped['整句没了']))} 句整句没了" if dropped["整句没了"] else "") if dropped["处"] else f"不出字幕：{'、'.join(dropped['词'])} —— 一处都没有")
+
         name = f"{project.name}_歌词视频_{a.version}"
-        r.note("成片", "开始", "ffmpeg：图 + 逐字字幕 + 推近 + 成品音频 → 1080p mp4")
+        r.note("成片", "开始", "ffmpeg：画面 + 逐字字幕 + 成品音频 → 1080p mp4")
         argv = [sys.executable, HERE / "lyric_video.py", timing, audio, out, "--name", name, "--title", title, "--fx", a.fx, "--side", a.side, "--ffmpeg", cfg["ffmpeg"]]
         for img in images:
             argv += ["--image", img]
@@ -253,7 +283,8 @@ def main() -> int:
         mp4 = out / f"{name}.mp4"
         if not mp4.exists():
             raise StepFailed("成片", f"没出 {mp4.name}")
-        r.note("成片", "完成", f"{mp4.name}（{mp4.stat().st_size / 1e6:.1f} MB）")
+        length = media_seconds(cfg["ffmpeg"], mp4, r.logs / f"视频_{a.version}_成片时长.log")
+        r.note("成片", "完成", f"{mp4.name}（" + (f"{mmss(length)}，" if length else "") + f"{mp4.stat().st_size / 1e6:.1f} MB）")
 
         r.note("剪映草稿", "开始", f"pyJianYingDraft 新建「{draft_name}」")
         argv = [cfg["video_python"], HERE / "jianying_draft.py", timing, audio, draft_name, "--drafts", drafts, "--title", title, "--fx", a.fx, "--side", a.side]
@@ -267,7 +298,7 @@ def main() -> int:
         r.note("剪映草稿", "完成", str(drafts / draft_name))
 
         lines = [f"# 《{project.name}》歌词视频 {a.version}", "", f"- 生成：{stamp()}（video_run.py，一条命令跑完）",
-                 f"- 成片：`{mp4.name}`（1080p 30 帧；字幕样式「{a.fx}」{'：整行逐字变色' if a.fx == '平铺' else '：每个字按自己唱的时间动'}；"
+                 f"- 成片：`{mp4.name}`（" + (f"{mmss(length)}，" if length else "") + f"1080p 30 帧；字幕样式「{a.fx}」{'：整行逐字变色' if a.fx == '平铺' else '：每个字按自己唱的时间动'}；"
                  + ("视频底片循环铺满" if all(pathlib.Path(x).suffix.lower() in VIDEO_EXT for x in a.image)
                     else "图缓慢推近、视频底片循环" if any(pathlib.Path(x).suffix.lower() in VIDEO_EXT for x in a.image) else "整首缓慢推近") + "）",
                  f"- 剪映草稿：「{draft_name}」（在剪映的草稿列表里；"
@@ -280,6 +311,7 @@ def main() -> int:
                  f"- 字幕时间：从 `{svp}` 来（{t['语言']}；{t['统计']['出字幕的行']} 行出字幕）"
                  + (f"；没出字幕的 {len(t['没出字幕的行'])} 行：第 {'、'.join(str(x['行']) for x in t['没出字幕的行'])} 行" if t["没出字幕的行"] else ""),
                  f"- 对齐：{align['说明']}",
+                 *([f"- 不出字幕的词：{'、'.join(dropped['词'])}（{dropped['处']} 处，第 {'、'.join(map(str, dropped['句']))} 句；删之前的时间在 `逐字时间_删词前.json`）"] if dropped and dropped["处"] else []),
                  f"- 音频：`{a.audio}`（拷了一份在 素材\\）", "- 画面：" + "、".join(f"`{x}`" + ("（视频，循环）" if pathlib.Path(x).suffix.lower() in VIDEO_EXT else "") for x in a.image) + ("" if a.side == "auto" else f"；字放{'左' if a.side == 'left' else '右'}边（指定的）"),
                  f"- 标题：{title}" + (f"；署名：{credit}" if credit else "；没放署名"), ""]
         if warnings:
@@ -291,7 +323,8 @@ def main() -> int:
         (r.logs / f"视频_{a.version}.json").write_text(json.dumps({"结果": "失败", "步": e.step, "原因": e.why, "各步": r.steps}, ensure_ascii=False, indent=1), encoding="utf-8")
         return 1
     total = round(time.time() - r.t0)
-    summary = {"结果": "完成", "总秒": total, "版本": a.version, "成片": str(mp4), "剪映草稿": str(drafts / draft_name), "工程": str(svp),
+    summary = {"结果": "完成", "总秒": total, "后台用时": mmss(total), "成片秒": round(length, 2) if length else None, "成片时长": mmss(length) if length else None,
+               "版本": a.version, "成片": str(mp4), "剪映草稿": str(drafts / draft_name), "工程": str(svp),
                "语言": t["语言"], "字幕行": t["统计"]["出字幕的行"], "没出字幕的行": [x["行"] for x in t["没出字幕的行"]],
                "对齐": align["说明"], "提醒": warnings, "各步": r.steps}
     (r.logs / f"视频_{a.version}.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")

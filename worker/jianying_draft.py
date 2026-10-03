@@ -91,8 +91,11 @@ def build(timing: dict, audio: str, images: list[str], title: str | None, credit
     cute = fx == "可爱" and timing["语言"] == "zh"
     sharp = fx == "凌厉" and timing["语言"] in ("zh", "ja")         # 日语凌厉：剪映的默认字体（霸道楷没有假名）
     if cute or sharp:
-        from image_side import line_sides
+        from image_side import line_sides, text_area
         sides = [side] * len(lines) if side in ("left", "right") else line_sides(lines, images, total + start)
+        # 和成片一样放在那一边能放字的范围里（左 60–860 / 右 1060–1860 像素）：放在正中，超过范围的宽度剪映自己换行
+        area_x = {s_: ((text_area(s_)[0] + text_area(s_)[1]) / 2 - W / 2) / (W / 2) for s_ in ("left", "right")}
+        area_w = (text_area("left")[1] - text_area("left")[0]) / W
     for k, (ln, (show, hide)) in enumerate(zip(lines, line_windows(lines))):
         s, e = show - start, hide - start
         if e <= 0 or s >= total:
@@ -106,17 +109,17 @@ def build(timing: dict, audio: str, images: list[str], title: str | None, credit
         if cute:
             rgb = tuple(c / 255 for c in CUTE_RGB[k % len(CUTE_RGB)])
             light = tuple(0.35 + 0.65 * c for c in rgb)
-            side_x = -0.479 if sides[k] == "left" else 0.479      # 那一边 880 像素宽的地方的正中（和成片一样）
+            side_x = area_x[sides[k]]
             seg = draft.TextSegment(cute_rows(ln, timing["语言"]), Timerange(a, b - a), font=FontType.快乐体,
-                                    style=TextStyle(size=12.0, color=(1.0, 1.0, 1.0), align=1, line_spacing=2),
+                                    style=TextStyle(size=12.0, color=(1.0, 1.0, 1.0), align=1, line_spacing=2, auto_wrapping=True, max_line_width=area_w),
                                     border=TextBorder(color=rgb, width=60.0), shadow=TextShadow(color=light, alpha=0.85, diffuse=40.0, distance=0.0),
                                     clip_settings=ClipSettings(transform_x=side_x, transform_y=0.14, rotation=-6.0))
             seg.add_animation(TextIntro.逐字显影, duration=min(us(sung), b - a))
             seg.add_animation(TextOutro.向左模糊, duration=min(us(0.35), b - a))
         elif sharp:                                         # 凌厉：剪映的「Aa霸道楷」、白字黑边红影；打字机（唱到哪出到哪）、闪一下退场
-            side_x = -0.437 if sides[k] == "left" else 0.437      # 那一边 1000 像素宽的地方的正中（和成片一样）
+            side_x = area_x[sides[k]]
             seg = draft.TextSegment(cute_rows(ln, timing["语言"]), Timerange(a, b - a), font=FontType.Aa霸道楷 if timing["语言"] == "zh" else None,
-                                    style=TextStyle(size=15.0, color=(1.0, 1.0, 1.0), align=1, line_spacing=2),
+                                    style=TextStyle(size=15.0, color=(1.0, 1.0, 1.0), align=1, line_spacing=2, auto_wrapping=True, max_line_width=area_w),
                                     border=TextBorder(color=(0.05, 0.05, 0.05), width=30.0),
                                     shadow=TextShadow(color=tuple(c / 255 for c in (0xE5, 0x24, 0x3B)), alpha=1.0, diffuse=0.0, distance=8.0, angle=-45.0),
                                     clip_settings=ClipSettings(transform_x=side_x, transform_y=0.08))
