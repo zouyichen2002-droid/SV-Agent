@@ -57,8 +57,12 @@ python video_run.py <项目文件夹> --version vNN --audio <成品音频> --ima
 `add_octave_harmony.py`：主轨在给定几段里的音复制一份、移一个八度，放成新轨（下八度、上八度各一条，一条开一条静音，比主轨低几分贝）；原来的轨不动，新文件已经存在就不写。
 
 ```
-python add_octave_harmony.py <工程.svp> <新工程.svp> --section 40.0-55.8 [--section …] [--on below|above] [--gain -6] [--track 主轨名]
+python add_octave_harmony.py <工程.svp> <新工程.svp> --lines 14-18,44-48 [--readme] [--on below|above] [--gain -6] [--track 主轨名]
+python add_octave_harmony.py <工程.svp> <新工程.svp> --section 40.0-55.8 [--section …] …
 ```
 
-- 音的开头落在 [开始, 结束) 里才复制。输出里「两头」列出每段复制的第一个、最后一个音和紧挨着没复制的音：段要从哪句开始，对着看
+- `--lines`（第几句到第几句）：用做字幕那套代码对出每句唱的起止，取第一句第一个字到最后一句最后一个字 —— 不会多带上一句的音；歌词默认 `<项目>\素材\歌词_要唱的字.txt`
+- `--section`（秒）：音的开头落在 [开始, 结束) 里才复制。输出里「两头」列出每段复制的第一个、最后一个音和紧挨着没复制的音，对着看
+- `--readme`：在新工程旁边写 `说明.md`
+- 创作者 10-03 定：和声不进 DSH、不做成通用技能 —— 他说哪几句要加，手动跑这个
 - 《怪物》r03 就是这样做的，见 `docs/v3/s3-cover.md` §3.6（r02 因为边界多带了一个音弃用）
