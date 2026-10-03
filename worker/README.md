@@ -50,3 +50,15 @@ python video_run.py <项目文件夹> --version vNN --audio <成品音频> --ima
 - 进度一行一个 JSON 在 `日志\视频进度.jsonl`；总结在 `日志\视频_vNN.json`；每步的输出在 `日志\视频_vNN_<步>.log`
 - 自检：`python audio_offset.py --selftest`、`python lyric_fx.py --calibrate`（特效字幕每个字的位置）；用真歌测过的数字见 `docs/v3/s10-video.md` §3–5
 - 「可爱」（默认）用站酷快乐体，「凌厉」用马善政毛笔楷书（大字、竖排小字都是；日语用佑字肅；都在 `cover_config.json` 的 `fonts_dir`，不装进系统；每一版拷一份到 `视频\vNN\_fonts\`）；「凌厉」出片前把底图调一次（压暗、降饱和、暗角、颗粒，存 `视频\vNN\_底图\`）；拆行（`lyric_rows.py`）和字放哪边（`image_side.py`）成片和剪映草稿共用
+- 字只放在 `image_side.text_area` 里（判断哪边空时量的那 45%：左 60–860、右 1060–1860 像素），按整块外框居中（10-02《怪物》雨夜底片压到人物的手以后改的，见 `docs/v3/s10-video.md` §5.6）
+
+## 八度和声（10-02）
+
+`add_octave_harmony.py`：主轨在给定几段里的音复制一份、移一个八度，放成新轨（下八度、上八度各一条，一条开一条静音，比主轨低几分贝）；原来的轨不动，新文件已经存在就不写。
+
+```
+python add_octave_harmony.py <工程.svp> <新工程.svp> --section 40.0-55.8 [--section …] [--on below|above] [--gain -6] [--track 主轨名]
+```
+
+- 音的开头落在 [开始, 结束) 里才复制。输出里「两头」列出每段复制的第一个、最后一个音和紧挨着没复制的音：段要从哪句开始，对着看
+- 《怪物》r03 就是这样做的，见 `docs/v3/s3-cover.md` §3.6（r02 因为边界多带了一个音弃用）
