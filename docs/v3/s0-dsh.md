@@ -59,6 +59,8 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
 | 16k 下压缩从不触发 | 触发线 = `floor(min(W×0.8, W−输出预留−65536))`，16k 下是负数 → 抛错、只警告一次、跳过（`dsh-compaction-basic\lib\index.js`）；DSH 的日志不打到我们的启动日志里，界面上也看不出来 | 「SV 创作」预设里按模型配 `headroomTokens: 1024`、摘要上限 1024；模型条目加 `maxTokens: 4096` |
 | 预设里的行改不动 | 补丁按 id 找行时只往 `group: true` 的分组里钻；预设的子行在 `config.plugins` 里，找不到 | 另建一个预设（官方也说：要么整份覆盖，要么新建） |
 | 停服务时子进程常常留着 | Git Bash 下停后台任务不一定连带停掉 node / llama | 停完按端口查进程、核对命令行再单独停 |
+| 工具参数写成复读、写满 4096 输出上限（10-02、10-03 各一次，各卡 10 多分钟） | DSH 不传采样参数，用的是 llama.cpp 默认（温度 0.8、top-k 40、top-p 0.95、不防复读）；一次把「怪物DSH测试」写成「怪物盘中测试盘中盘中…」，从会话记录（`session.v4.jsonl.zstd`，几个 zstd 帧接在一起）里拼出来的 | `start-llama.sh` 改成 Qwen3 非思考模式推荐的温度 0.7、top-p 0.8、top-k 20、min-p 0，再开 DRY 防复读（`--dry-multiplier 0.8`；引号、冒号是断点，不罚）。改完同一句话 36 秒建好项目（输出 106 个字） |
+| 开 DSH 的后台任务被收掉后，DSH 起的子程序全死（0xC0000142） | DSH 挂在 Claude 会话的后台任务上，任务到时间被收掉、控制台没了 | 改用 PowerShell `Start-Process` 开隐藏窗口（DSH 和模型都这样开）；插件遇到这个退出码会直说「要重开 DSH」 |
 
 ## 3. 跑通的证据
 
