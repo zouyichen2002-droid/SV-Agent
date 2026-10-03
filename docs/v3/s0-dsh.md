@@ -5,7 +5,7 @@
 | 对应 | PRD §0.4 阶段 0：「原样跑通 DSH（本地模型）；弄懂 Context / Plugin / Service、Session / Tool / Agent Loop」 |
 | 日期 | 2026-10-01 |
 | 状态 | **跑通了**：本地模型、专用工作区、沙箱把写入关在工作区里、越界要审批；Python 翻唱链路的两个环境在沙箱里能跑、能用显卡；为 16k 上下文配了精简预设「SV 创作」、压缩重配并实测走通。设计见第 5 节，对阶段 1–4 的含义见第 6 节 |
-| 版本 | DSH 0.2.0-rc.2（npm 锁版本，开发者预览）· llama.cpp b11259 CUDA 13.4 · Qwen3.8-27B UD-IQ4_XS |
+| 版本 | DSH 0.2.0-rc.2（npm 锁版本，开发者预览）· llama.cpp b11259 CUDA 13.4 · Qwen3.8-27B UD-IQ4_XS（10-03 起默认换成 Qwen3.6-35B-A3B，见 [moe-trial.md](moe-trial.md)） |
 
 DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-home`、`E:\sv-agent-workspace`）；这份材料只记怎么装、测了什么、学到什么。
 访问令牌、模型服务密钥都不写进来。
@@ -22,12 +22,13 @@ DSH 的东西全在仓库外（`E:\sv-agent-data\dsh`、`E:\sv-agent-data\dsh-ho
   已处理：另建精简预设「SV 创作」（16 个工具）→ **起手降到 29%（约 4.8K）**；压缩按 16k 重配（约 11.3K 开始压）→ `/compact` 实测走通。
   你 10-01 定：**本地为主，上下文不够时用 DeepSeek 接口**（先说过 Mistral，又改成 DeepSeek，「和 dsh 适配性更强」）。
 - **其次是内存**：模型服务常驻约 11–13 GB，开着的时候整机可用内存只剩 0.5–1.5 GB → 不用就关，要用 12 秒起来。
+  （10-03 更正：11–13 GB 是「私有字节」，里面约 9.5 GB 是显卡驱动给显存记的账，没占内存条；Qwen3.8-27B 实占约 5–6 GB。见 [moe-trial.md](moe-trial.md) §2）
 
 ## 2. 怎么跑起来的
 
 ```
  llama.cpp（CUDA）─ 127.0.0.1:8081，要密钥，跨域只认本机，关 /slots，低优先级
-   │  Qwen3.8-27B，上下文 16k，KV 8 位，放不进显存的层自动放 CPU，服务端关思考
+   │  Qwen3.8-27B，上下文 16k，KV 8 位，放不进显存的层自动放 CPU，服务端关思考（10-03 起：Qwen3.6-35B-A3B、32k，见 moe-trial.md）
    ▼
  DSH web ─ 127.0.0.1:3080（只开本机，令牌登录），遥测关
    │  配置档 web + 我们的补丁 cordis.patch.yml：

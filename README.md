@@ -9,7 +9,7 @@
   详见 [docs/m1/station-end.md](docs/m1/station-end.md)
 - **方向（v3）**：从翻唱 / 创作助手往**个人创作工作台**长 —— 作品管理、个人偏好、创作口味、喜爱作品、逆向学习记忆、Skill 接入、GUI 操作、教学……
   以 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 当 Agent 底座，先原样用、再一步步改，我们只写创作领域的插件；第一个 Skill 就是上面的翻唱链路。
-  模型本地为主（llama.cpp + Qwen3.8-27B），上下文不够时用 DeepSeek 的接口
+  模型本地为主（llama.cpp + Qwen3.6-35B-A3B；10-03 从 Qwen3.8-27B 换过来，出字快 9 倍多、上下文 32k，见 [docs/v3/moe-trial.md](docs/v3/moe-trial.md)），上下文不够时用 DeepSeek 的接口
 - **阶段 0 完**：DSH 在本机原样跑通（本地模型、专用工作区、沙箱、审批），也弄清楚了它怎么搭起来的 —— 见 [docs/v3/s0-dsh.md](docs/v3/s0-dsh.md)
 - **阶段 1 做完**：Project 插件 —— 一首歌一个工作区，在哪首歌下面开会话，Agent 就知道是哪首、做到哪了；做过的 5 首已建成项目 —— 见 [docs/v3/s1-project.md](docs/v3/s1-project.md)
 - **阶段 2 做完**：Artifact 插件 —— 一版一个 `rNN` 文件夹；交付以后 Agent 不能覆盖；作者在 SV 里改了存盘，约 2 秒内自动备份到工作区外的快照库 —— 见 [docs/v3/s2-artifact.md](docs/v3/s2-artifact.md)

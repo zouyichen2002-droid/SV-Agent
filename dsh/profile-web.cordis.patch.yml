@@ -20,22 +20,28 @@
             input: [ text ]
             contextWindow: 16384
             maxTokens: 4096        # 10-01：每次请求的输出上限（也是压缩算账时的输出预留）；最长的回复（中文总结、写一份技能说明）1–3K
+          # 10-03 起的默认：Qwen3.6-35B-A3B（MoE，start-llama.sh，上下文 32k）；上面的 Qwen3.8-27B（start-llama-27b.sh，16k）留着备用。两个同一个端口，同时只开一个
+          - id: qwen3.6-35b-a3b
+            input: [ text ]
+            contextWindow: 32768
+            maxTokens: 4096
+# 默认模型要和正在跑的模型服务对上：start-llama.sh → qwen3.6-35b-a3b；start-llama-27b.sh → qwen3.8-27b
 - id: agent-default-model
   config:
     provider: local-llama
-    model: qwen3.8-27b
+    model: qwen3.6-35b-a3b   # 10-03 创作者定（实测见 sv-bridge/docs/v3/moe-trial.md）
 # SV 创作预设（10-01）：从 standard 预设（@deepseek-ai/dsh-web-app 的 presets/standard.patch.yml）抄出来、只留用得到的，standard 原样留着对照。
 # 为什么另建：预设里的子行不能用补丁按 id 改（补丁只往 group 里找），改 standard 就得整份重抄；另建一个更干净，阶段 1 的 Project 插件也挂这里。
 # 去掉的：子 Agent / workflow（PRD §0.4「先不做多 Agent」）、长期目标三件套、计划模式（联网工具起初也去掉了，创作者 10-01 说「要加回来」→ 已加回）
 #   → 新会话起手的固定开销从约 7.4K token（16k 的 45%）降下来，实测数字记在 sv-bridge/docs/v3/s0-dsh.md
-# 压缩：默认按「留 65536 token 余量」算，16k 窗口下是负数 → 只警告一次、从不主动压缩（compaction-basic lib/index.js）；这里按 16k 重配
+# 压缩：默认按「留 65536 token 余量」算，16k / 32k 窗口下都是负数 → 只警告一次、从不主动压缩（compaction-basic lib/index.js）；这里按本地模型各自的窗口重配
 - insert:
     - id: preset-sv
       name: '@deepseek-ai/dsh-agent-preset'
       config:
         id: sv
         name: SV 创作
-        description: 本地模型（16k）用的精简预设：文件、PowerShell、后台任务、技能、交付；压缩按 16k 配
+        description: 本地模型用的精简预设：文件、PowerShell、后台任务、技能、交付；压缩按模型的窗口配（默认 32k）
         order: 0
         plugins:
           - id: persona
@@ -78,11 +84,15 @@
               - id: compaction-basic
                 name: '@deepseek-ai/dsh-compaction-basic'
                 config:
-                  modelPolicies:             # 只改本地 16k 模型；以后接 DeepSeek 接口（创作者 10-01 定）的大窗口模型走默认
+                  modelPolicies:             # 只改本地模型（16k / 32k）；以后接 DeepSeek 接口（创作者 10-01 定）的大窗口模型走默认
                     - provider: local-llama
                       model: qwen3.8-27b
                       headroomTokens: 1024   # 触发线 = floor(min(16384×0.8, 16384−4096−1024)) = 11264；最近 16% 原样留（约 1966）
                       maxTokens: 1024        # 摘要的输出上限（默认跟 headroomTokens 走）；10-01 /compact 实测 41 秒走通
+                    - provider: local-llama
+                      model: qwen3.6-35b-a3b   # 10-03 起的默认，32k 窗口；实测一个会话里翻唱 + 出视频只用到 43%，没压缩
+                      headroomTokens: 1024   # 触发线 = floor(min(32768×0.8, 32768−4096−1024)) = 26214
+                      maxTokens: 1024
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'
               - id: tool-result-pruner
@@ -136,7 +146,7 @@
         memory: E:/sv-agent-data/memory   # 阶段 6：记忆里生效的「这首不挑八度」这类偏好，翻唱时自动用、记下用过
         llama:
           port: 8081
-          start: [ 'C:/Program Files/Git/bin/bash.exe', 'E:/sv-agent-data/dsh/start-llama.sh' ]
+          start: [ 'C:/Program Files/Git/bin/bash.exe', 'E:/sv-agent-data/dsh/start-llama.sh' ]   # 开的是默认模型（10-03 起 Qwen3.6-35B-A3B）
           log: E:/sv-agent-data/dsh/llama-server.log
 # sv-memory（阶段 6）：创作者的反馈（原话）、偏好（他点头才生效）、历史。创作者 10-01 定：反馈自动记原话；偏好 Agent 提议、他点头才生效；
 # 以前说过的规矩和评价导进来、他过一遍。记忆库在工作区外面（Agent 的沙箱写不进去）；给人看的清单：<项目>\记忆.md、<store>\全局记忆.md
