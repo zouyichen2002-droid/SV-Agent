@@ -21,6 +21,7 @@
   后台 3–5 分钟出 1080p 成片（歌词逐字变色，时间从 SV 工程来；自动核对成品音频比工程晚几秒、字幕跟着平移）和一份剪映草稿（剪映里接着改）—— 见 [docs/v3/s10-video.md](docs/v3/s10-video.md)。
   特效字幕默认「可爱」，还有「凌厉」；画面可以是图，也可以是循环的视频底片；字只放在画面空的那一边、不压人物；可以指定不出字幕的词
 - **第一首完整走通（10-03）**：《怪物》从翻唱、作者在 SV 里改、加八度和声（`worker/add_octave_harmony.py`）、出视频，到发 B 站 —— 见 [docs/v3/guaiwu-end-to-end.md](docs/v3/guaiwu-end-to-end.md)
+- **第一首代码画的 MV（10-03）**：照 [pdoom-video](https://github.com/mexicat/pdoom-video) 的引擎（`mv/`），按句意一句一页画《逃跑的天使》「小天使的人间手账」（1080p60、带运动模糊），作者已投 B 站 —— 见 [docs/v3/mv-escape-angel.md](docs/v3/mv-escape-angel.md)、[mv/README.md](mv/README.md)
 
 > 这是 v2（2026-09 清空重写）。v1 的代码在标签 `v1-archive`；第一个发布在标签 `v0.1.0`（那时只有《傍晚》一首）。需求见 [PRD.md](PRD.md)。
 
