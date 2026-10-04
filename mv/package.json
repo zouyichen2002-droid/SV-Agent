@@ -1,0 +1,19 @@
+{
+  "name": "sv-agent-mv",
+  "private": true,
+  "type": "module",
+  "description": "代码画的 MV：引擎来自 mexicat/pdoom-video（MIT，见 LICENSE-pdoom-video.txt），改成用 Node 跑、接我们自己的歌",
+  "scripts": {
+    "dev": "vite",
+    "render": "node scripts/render.ts"
+  },
+  "dependencies": {
+    "opentype.js": "2.0.0",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0",
+    "vite": "8.3.2",
+    "ws": "8.22.0"
+  }
+}

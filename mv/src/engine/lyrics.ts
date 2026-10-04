@@ -1,0 +1,125 @@
+// Word-timed lyrics (song/lyrics.json) with queries for karaoke rendering.
+// SV-Agent（10-03）：中文、日文一个单位是一个字 / 词，中间没有空格（lineCharProgress、norm 跟着改）；
+//   数据从 /song/ 读（vite 指到仓库外那首歌的 MV 文件夹，歌词不进仓库）。
+import { smart } from './type';
+
+export interface Word {
+  w: string; // display token (punctuation attached, typographic quotes: don’t, ’cause)
+  start: number;
+  end: number;
+  conf?: number;
+  syl?: [number, number][];
+  /** filled in by Lyrics: */
+  line: number;
+  index: number; // index within line
+  gi: number; // global word index
+}
+export interface Line {
+  i: number;
+  text: string;
+  start: number;
+  end: number;
+  words: Word[];
+}
+
+export class Lyrics {
+  lines: Line[];
+  words: Word[];
+  constructor(j: { lines: Omit<Line, 'words'> & { words: Omit<Word, 'line' | 'index' | 'gi'>[] }[] | any[] }) {
+    // display text gets curly apostrophes and quotes (the data keeps the typed ones); mono UI
+    // text that wants them straight uses plain()
+    this.lines = (j.lines as any[]).map((l, li) => ({
+      ...l,
+      i: li,
+      text: smart(l.text),
+      words: (l.words as any[]).map((w, wi) => ({ ...w, w: smart(w.w), line: li, index: wi, gi: 0 })),
+    }));
+    this.words = this.lines.flatMap((l) => l.words);
+    this.words.forEach((w, i) => (w.gi = i));
+  }
+
+  static async load(): Promise<Lyrics> {
+    for (const url of ['song/lyrics.json']) {
+      const r = await fetch(url);
+      if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) return new Lyrics(await r.json());
+    }
+    throw new Error('no lyrics data found');
+  }
+
+  /** The line being sung at t (or null in gaps). */
+  lineAt(t: number): Line | null {
+    return this.lines.find((l) => t >= l.start && t < l.end) ?? null;
+  }
+  /** Most recent line that started at or before t. */
+  lastLine(t: number): Line | null {
+    let best: Line | null = null;
+    for (const l of this.lines) if (l.start <= t) best = l;
+    return best;
+  }
+  nextLine(t: number): Line | null {
+    return this.lines.find((l) => l.start > t) ?? null;
+  }
+  linesIn(t0: number, t1: number): Line[] {
+    return this.lines.filter((l) => l.end > t0 && l.start < t1);
+  }
+  /** Lines whose text includes `s` (case-insensitive, straight or curly quotes). Handy for finding a lyric by content. */
+  find(s: string): Line[] {
+    const q = fold(s);
+    return this.lines.filter((l) => fold(l.text).includes(q));
+  }
+  /** First line containing `s`; throws if missing (fail loudly while authoring). */
+  get(s: string, nth = 0): Line {
+    const l = this.find(s)[nth];
+    if (!l) throw new Error(`lyric not found: ${s}`);
+    return l;
+  }
+  wordAt(t: number): Word | null {
+    return this.words.find((w) => t >= w.start && t < w.end) ?? null;
+  }
+  lastWord(t: number): Word | null {
+    let best: Word | null = null;
+    for (const w of this.words) if (w.start <= t) best = w;
+    return best;
+  }
+  /** Words whose normalized text matches (e.g. 'p(doom)'). */
+  findWords(s: string): Word[] {
+    const q = norm(s);
+    return this.words.filter((w) => norm(w.w) === q);
+  }
+
+  /**
+   * Sung progress of a word at time t: 0 before start, 1 after end, linear inside
+   * (or piecewise across syllables when available). Use for karaoke wipes.
+   */
+  static wordProgress(w: Word, t: number): number {
+    if (t <= w.start) return 0;
+    if (t >= w.end) return 1;
+    if (w.syl && w.syl.length > 1) {
+      const n = w.syl.length;
+      for (let i = 0; i < n; i++) {
+        const [a, b] = w.syl[i]!;
+        if (t < a) return i / n;
+        if (t < b) return (i + (t - a) / Math.max(1e-3, b - a)) / n;
+      }
+      return 1;
+    }
+    return (t - w.start) / Math.max(1e-3, w.end - w.start);
+  }
+
+  /** Progress through a whole line in characters (0..text.length), for per-glyph wipes. */
+  static lineCharProgress(l: Line, t: number): number {
+    // words are separated by a space only when the line has spaces (English); Chinese / Japanese units touch
+    const sep = l.text.includes(' ') ? 1 : 0;
+    let chars = 0;
+    for (const w of l.words) {
+      const p = Lyrics.wordProgress(w, t);
+      chars += p * Array.from(w.w).length;
+      if (p < 1) break;
+      chars += sep;
+    }
+    return Math.min(chars, Array.from(l.text).length);
+  }
+}
+
+export const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}()]/gu, '');
+const fold = (s: string) => s.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
