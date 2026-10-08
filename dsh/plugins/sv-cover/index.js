@@ -151,6 +151,17 @@ export function apply(ctx, config) {
   const recent = new Map()          // 会话 id → 最近几条用户消息的文字
   const turnWaiters = new Map()     // 会话 id → 等「这一轮说完」的回调
   const running = new Map()         // 项目文件夹 → 任务 id（一首歌同时只跑一个）
+  const waiting = new Map()         // 会话 id → 在等「这一轮说完」才开跑的翻唱任务 id
+
+  // 10-07《公主》r04：模型调完 cover_run 又调 job_output 等结果 —— 可任务要等这一轮说完、让出大模型才开跑，两边互相等，
+  // 只能手动点「停止生成」（10-04《由》也卡过一次，最后重试 5 次连接错误）。技能里写了「不要调 job_output」，模型照样调 → 插件直接拦
+  ctx.tools.guard((exec) => {
+    if (exec?.name !== 'job_output') return undefined
+    const jobId = waiting.get(exec?.agent?.session?.id)
+    if (jobId === undefined) return undefined
+    return `翻唱任务 ${jobId} 要等这一轮说完、让出本地大模型以后才开始跑，现在读不到结果；跑完你会被自动唤醒、拿到结果。`
+      + '现在用一两句话告诉创作者已经开始了，然后结束这一轮，不要再调工具。'
+  })
 
   ctx.on('session/event', (session, event) => {
     if (event?.type === 'user/message' && event.data?.source?.kind === 'user') {
@@ -264,6 +275,7 @@ export function apply(ctx, config) {
           progressLine = readProgress(join(dir, '日志', '进度.jsonl'), 0).next
           const body = async () => {
             await waitTurnEnd(session.id)
+            if (waiting.get(session.id) === jobId) waiting.delete(session.id)
             if (cancelled) return { status: 'killed', detail: cancelled, result: `${label} 还没开始就停掉了；${id} 留着「进行中」` }
             const s = await llama.stop()
             llamaStopped = !/没开着|no-llama/.test(s)
@@ -305,8 +317,20 @@ export function apply(ctx, config) {
                 writeProject(dir, p)
               }
               const st = summary.统计 ?? {}
-              return { status: 'completed', result: `${label} 跑完了，${Math.round(summary.总秒 / 60)} 分钟；已交付 ${id}（${files.length} 个文件）。`
-                + `工程：${st.工程}；扒出 ${st.扒出的音} 个音，改了 ${st.改八度} 个八度。说明在 ${join(dir, id, '说明.md')}；用 present 把工程交给创作者听。` }
+              // 10-07《公主》r04：交付时模型把文字里的路径写成了同一文件夹里的「吸格线前」那份，也没提调式、重复段八度 →
+              // 插件不能自己往对话里发消息，就把要 present 的路径和「给创作者的话」都写好，让模型照抄
+              // 同日 r05 实测：给了两条完整路径，第一条抄对了，第二条（说明.md）连着三次抄成「r5」「李05」—— present 有一条找不到就整批失败
+              // → 只交一个工程文件（说明.md 里要紧的已经写进给创作者的话），路径少、抄错的机会少
+              const svp = join(dir, id, `${basename(dir)}_扒谱_${id}.svp`)
+              const rep = Array.isArray(st.重复段八度) ? st.重复段八度 : []
+              const took = summary.总秒 < 60 ? `${Math.round(summary.总秒)} 秒` : `${Math.round(summary.总秒 / 60)} 分钟`   // 前面的步都跑过时只要十几秒，不写「0 分钟」
+              const say = [`《${basename(dir)}》${id} 翻唱出来了（${took}）：扒出 ${st.扒出的音} 个音，挑八度改了 ${st.改八度} 个`
+                + (st.调式 ? `；调式音阶设成 ${st.调式}` : '')
+                + (rep.length ? `；同样的歌词前面唱过、这一遍差一个八度的 ${rep.length} 处照第一遍改了（说明.md 里逐条列着，不对就改回去）` : '') + '。',
+                `请在 SV 里打开 ${basename(svp)} 听（要你听的地方都在同一文件夹的 说明.md 里），哪里不对直接改、存盘 —— 我会自动备份你改的样子，下一版照着学。`].join('\n')
+              return { status: 'completed', result: `${label} 跑完了，已交付 ${id}（${files.length} 个文件）。\n`
+                + `用 present 只交这一个文件，路径照抄、一个字都不要改，也不要加别的文件（不要加 说明.md、不要换成「吸格线前」那份）：\n- ${svp}\n`
+                + `然后把下面这段原样发给创作者（不要增删、不要编别的数字）：\n${say}` }
             }
             const why = summary?.原因 ?? `Worker 退出码 ${code}（看 ${outFile}）`
             return { status: 'failed', detail: why, result: `${label} 没跑完：${summary?.步 ?? ''} ${why}。${id} 留着「进行中」；修好以后再跑一次会接着做（做完的步跳过）` }
@@ -315,7 +339,7 @@ export function apply(ctx, config) {
           const done = body()
             .catch((e) => ({ status: 'failed', detail: String(e?.message ?? e), result: `${label} 插件出错：${e?.message ?? e}；${id} 留着「进行中」` }))
             .then(async (outcome) => { if (llamaStopped) log(await llama.start()); return outcome })
-            .finally(() => running.delete(dir))
+            .finally(() => { running.delete(dir); if (waiting.get(session.id) === jobId) waiting.delete(session.id) })
           const timer = setInterval(pump, POLL_MS)
           done.finally(() => clearInterval(timer))
           return {
@@ -328,6 +352,7 @@ export function apply(ctx, config) {
         },
       })
       running.set(dir, jobId)
+      waiting.set(session.id, jobId)
       return `开始了：${label}（后台任务 ${jobId}${resume ? `；接着上次没跑完的 ${id}，做完的步跳过` : ''}）。${lyricNote}${octavePick ? '' : '；这一版不挑八度'}${prefNote ? `（${prefNote}）` : ''}。来源：${source}。约 15–25 分钟（分离约 2 分钟、找拍子十几分钟）；`
         + '这段时间本地大模型会让出来，聊不了天；跑完自动载回，你会被唤醒、再告诉创作者结果。现在简短告诉创作者，然后结束这一轮。'
     },

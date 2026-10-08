@@ -35,7 +35,7 @@ const name = basename(dir)
 mkdirSync(join(dir, round), { recursive: true })
 writeFileSync(join(dir, round, name + '_扒谱_' + round + '.svp'), '{"fake":true}')
 writeFileSync(join(dir, round, '说明.md'), 'fake')
-writeFileSync(join(dir, '日志', '翻唱_' + round + '.json'), JSON.stringify({ 结果: '完成', 总秒: 61, 统计: { 工程: join(dir, round, name + '_扒谱_' + round + '.svp'), 扒出的音: 580, 改八度: 2 } }))
+writeFileSync(join(dir, '日志', '翻唱_' + round + '.json'), JSON.stringify({ 结果: '完成', 总秒: 61, 统计: { 工程: join(dir, round, name + '_扒谱_' + round + '.svp'), 扒出的音: 580, 改八度: 2, 调式: 'G 和声小调', 重复段八度: ['甲', '乙'] } }))
 note('结束', '完成')
 `)
 
@@ -58,8 +58,10 @@ try {
   const listeners = new Map()
   const jobs = []
   const llamaCalls = []
+  const guards = []
+  const guarded = (name, sessionId) => guards.map((g) => g({ name, arguments: {}, agent: { session: { id: sessionId } } })).find((x) => x !== undefined)
   const ctx = {
-    tools: { register: (t) => { tools.set(t.name, t) } },
+    tools: { register: (t) => { tools.set(t.name, t) }, guard: (fn) => { guards.push(fn) } },
     on: (name, fn) => { listeners.set(name, fn) },
     jobs: { start: (spec) => { const id = `cover-${jobs.length + 1}`; const hooks = spec.run({ id, append: (t, o) => { (spec.out ??= []).push([o?.channel, t]) }, updateProgress: () => {} }); jobs.push({ id, spec, hooks }); return id } },
     sandboxPolicy: { resolve: () => ({ mode: 'workspace-write', workspaceRoot: P }) },
@@ -93,14 +95,26 @@ try {
     assert.equal(readManifest(store, P).versions[0].id, 'r01')
     await sleep(300)
     assert.deepEqual(llamaCalls, [], 'Agent 这一轮还没说完：大模型不能让')
+    // 10-07：这一轮还没说完时模型调 job_output 等结果 → 拦下（不然两边互相等）；别的会话、别的工具不拦
+    assert.match(guarded('job_output', 's1') ?? '', /结束这一轮/)
+    assert.equal(guarded('job_output', 'other'), undefined)
+    assert.equal(guarded('job_list', 's1'), undefined)
     await assert.rejects(run({ source: OK }), /已经在跑了/)
   })
 
   await check('这一轮说完 → 让出大模型 → 跑 → 交付 r01、记项目状态 → 载回大模型', async () => {
     turnEnds()
+    await sleep(50)
+    assert.equal(guarded('job_output', 's1'), undefined, '这一轮说完了：不再拦 job_output')
     const outcome = await jobs[0].hooks.done
     assert.equal(outcome.status, 'completed', JSON.stringify(outcome))
     assert.match(outcome.result, /已交付 r01（2 个文件）/)
+    // 10-07：交付写好路径和给创作者的话，让模型照抄（《公主》r04 模型把路径写成了「吸格线前」那份、没提调式和重复段八度）
+    const paths = outcome.result.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2))
+    assert.deepEqual(paths, [join(P, 'r01', '测试歌_扒谱_r01.svp')], '只交一个工程文件（两条路径时本地模型会抄错第二条）')
+    assert.match(outcome.result, /调式音阶设成 G 和声小调/)
+    assert.match(outcome.result, /2 处照第一遍改了/)
+    assert.match(outcome.result, /测试歌_扒谱_r01\.svp 听/)
     assert.deepEqual(llamaCalls, ['stop', 'start'])
     const v = readManifest(store, P).versions[0]
     assert.ok(v.sealed, '交付了')
@@ -179,7 +193,7 @@ try {
   const tools2 = new Map()
   const listeners2 = new Map()
   const jobs2 = []
-  apply({ ...ctx, tools: { register: (t) => tools2.set(t.name, t) }, on: (n, fn) => listeners2.set(n, fn),
+  apply({ ...ctx, tools: { register: (t) => tools2.set(t.name, t), guard: () => {} }, on: (n, fn) => listeners2.set(n, fn),
     jobs: { start: (spec) => { const jid = `mem-${jobs2.length + 1}`; const hooks = spec.run({ id: jid, append: () => {}, updateProgress: () => {} }); jobs2.push({ id: jid, spec, hooks }); return jid } } },
   { root, store, python: process.execPath, worker: FAKE, sandbox: true, makeLlama: fakeLlama, memory: memStore })
   const s2 = { id: 's2', header: { cwd: Q } }
