@@ -31,6 +31,14 @@ from pyJianYingDraft.metadata.font_meta import FontType
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from lyric_video import line_windows  # noqa: E402  和成片同一套显示时间（只用 Python 自带模块，video 环境里也能用）
+import font_rules  # noqa: E402
+
+
+def _font(ft):
+    """剪映字体也守死规矩（创作者 10-04「定死规矩不要宋体」）：宋体一类直接报错。None = 剪映默认字体。"""
+    if ft is not None:
+        font_rules.check([ft.name], "剪映草稿")
+    return ft
 
 sys.stdout.reconfigure(encoding="utf-8")
 SEC = 1_000_000
@@ -110,7 +118,7 @@ def build(timing: dict, audio: str, images: list[str], title: str | None, credit
             rgb = tuple(c / 255 for c in CUTE_RGB[k % len(CUTE_RGB)])
             light = tuple(0.35 + 0.65 * c for c in rgb)
             side_x = area_x[sides[k]]
-            seg = draft.TextSegment(cute_rows(ln, timing["语言"]), Timerange(a, b - a), font=FontType.快乐体,
+            seg = draft.TextSegment(cute_rows(ln, timing["语言"]), Timerange(a, b - a), font=_font(FontType.快乐体),
                                     style=TextStyle(size=12.0, color=(1.0, 1.0, 1.0), align=1, line_spacing=2, auto_wrapping=True, max_line_width=area_w),
                                     border=TextBorder(color=rgb, width=60.0), shadow=TextShadow(color=light, alpha=0.85, diffuse=40.0, distance=0.0),
                                     clip_settings=ClipSettings(transform_x=side_x, transform_y=0.14, rotation=-6.0))
@@ -118,7 +126,7 @@ def build(timing: dict, audio: str, images: list[str], title: str | None, credit
             seg.add_animation(TextOutro.向左模糊, duration=min(us(0.35), b - a))
         elif sharp:                                         # 凌厉：剪映的「Aa霸道楷」、白字黑边红影；打字机（唱到哪出到哪）、闪一下退场
             side_x = area_x[sides[k]]
-            seg = draft.TextSegment(cute_rows(ln, timing["语言"]), Timerange(a, b - a), font=FontType.Aa霸道楷 if timing["语言"] == "zh" else None,
+            seg = draft.TextSegment(cute_rows(ln, timing["语言"]), Timerange(a, b - a), font=_font(FontType.Aa霸道楷) if timing["语言"] == "zh" else None,
                                     style=TextStyle(size=15.0, color=(1.0, 1.0, 1.0), align=1, line_spacing=2, auto_wrapping=True, max_line_width=area_w),
                                     border=TextBorder(color=(0.05, 0.05, 0.05), width=30.0),
                                     shadow=TextShadow(color=tuple(c / 255 for c in (0xE5, 0x24, 0x3B)), alpha=1.0, diffuse=0.0, distance=8.0, angle=-45.0),
@@ -133,7 +141,7 @@ def build(timing: dict, audio: str, images: list[str], title: str | None, credit
         end = us(max(1.0, lines[0]["开始"] - 0.8))
         if title:
             plan["标题"].append(draft.TextSegment(title, Timerange(us(0.3), end - us(0.3)), style=TextStyle(size=14.0, bold=not cute, align=1),
-                                                font=FontType.快乐体 if cute else None,
+                                                font=_font(FontType.快乐体) if cute else None,
                                                 border=TextBorder(color=tuple(c / 255 for c in CUTE_RGB[0]), width=60.0) if cute else border,
                                                 clip_settings=ClipSettings(transform_y=0.08)))
         if credit:

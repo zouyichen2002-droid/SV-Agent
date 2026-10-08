@@ -17,8 +17,18 @@ export const F = {
   mashan: () => 'MaShanZheng',
 };
 
+/** 死规矩（创作者 10-04「宋体不行，以后都不要宋体」「定死规矩不要宋体」；创作记忆 g24）：宋体一类的字体名直接报错。
+ *  和 worker/font_rules.py 同一套认法（「Sans Serif」这种无衬线的不算）。 */
+const SONG = /宋|仿宋|明体|明朝|细明|Song|SimSun|STSong|STZhongsong|FangSong|Serif|Mincho|MingLiU|Ming\b/i;
+export function checkFont(css: string): string {
+  const fams = css.split(',').map((s) => s.replace(/^[\s\d]*(px)?\s*/, '').replace(/^.*?px\s*/, '').replace(/["']/g, '').trim());
+  const bad = fams.filter((f) => f && !/sans/i.test(f) && SONG.test(f));
+  if (bad.length) throw new Error(`不许用宋体（创作者定死的规矩，创作记忆 g24）：${bad.join('、')}`);
+  return css;
+}
+
 /** CSS font string for Canvas2D. */
-export const font = (family: string, sizePx: number) => `${sizePx}px "${family}"`;
+export const font = (family: string, sizePx: number) => checkFont(`${sizePx}px "${family}"`);
 
 const otCache = new Map<string, opentype.Font>();
 const bufCache = new Map<string, ArrayBuffer>();

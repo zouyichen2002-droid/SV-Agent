@@ -15,9 +15,12 @@ const scene = (name: string) => () => {
 };
 
 export function makeTimeline(_ly: Lyrics, au: AudioData): TimelineEntry[] {
-  // 10-03《逃跑的天使》：整首一个手账场景（scenes/journal.ts），一句一格、自己换格
+  // 一首歌一个整首场景，用环境变量 VITE_MV_SCENE 选（不设 = journal）：
+  //   journal  10-03《逃跑的天使》：手账，一句一格、自己换格
+  //   theater  10-04《由》：人偶剧场
   if (import.meta.env.VITE_MV_PLACEHOLDER !== '1') {
-    return [{ id: 'journal', load: scene('journal'), start: 0, end: au.duration }];
+    const name = import.meta.env.VITE_MV_SCENE || 'journal';
+    return [{ id: name, load: scene(name), start: 0, end: au.duration }];
   }
   const secs = au.sections.length ? au.sections : [{ name: 'all', start: 0, end: au.duration }];
   return secs.map((s, i) => ({

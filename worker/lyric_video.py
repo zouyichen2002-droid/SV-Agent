@@ -135,6 +135,9 @@ def render(ffmpeg: str, images: list[str], audio: str, ass: pathlib.Path, out: p
            video_grade: str | None = None) -> list[str]:
     """一张图：整首推近 1.00 → 1.08；几张图：平均分时长、交叉淡化 1 秒（第一版先这样，段落换图以后再说）。
     视频底片：循环铺满它那一段（-stream_loop），不推近（底片自己会动）；video_grade：给视频底片加的调色（凌厉：暗角）。"""
+    # 死规矩（创作者 10-04「定死规矩不要宋体」）：字幕里出现宋体一类的字体就报错、不出片
+    import font_rules
+    font_rules.check_ass(pathlib.Path(ass).read_text(encoding="utf-8-sig"), pathlib.Path(ass).name)
     seg = duration if duration else total - start
     n = len(images)
     per = seg / n
