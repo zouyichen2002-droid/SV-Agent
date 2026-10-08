@@ -403,6 +403,9 @@ def main(cfg_path: str, *flags: str) -> int:
             f"{n} " + " ".join(f"{r['from_s']:.0f}:{r['phase_ms']:+.0f}" if r["locked"] else f"{r['from_s']:.0f}:·"
                                for r in rows if a - 15 < r["from_s"] < b)
             for n, rows in t.items()))
+    # 10-05《傍晚》：伴奏（SV 导出 178.05 s）和人声（Suno 分轨 177.6 s）不一样长 → 短的后面补静音
+    n = max(len(acc), len(voc))
+    acc, voc = np.pad(acc, (0, n - len(acc))), np.pad(voc, (0, n - len(voc)))
     mix = np.stack([acc + voc, acc + voc], axis=1) * 0.7
     keep = np.zeros(len(bt), bool)
     for a, b in m["metered"]:

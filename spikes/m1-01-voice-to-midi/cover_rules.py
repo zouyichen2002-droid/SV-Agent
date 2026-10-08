@@ -22,6 +22,11 @@
    认出来的整句（连拖音）全部用主音、去掉音分微调（song_round 里 rules_0930 ≥ 3）。《傍晚》终稿和基线上照样一个音都不认。
    全部用一个音改得更狠，所以认得更保守：还要带字的音里至少 2 个、至少 1/4 是在主音上下一个半音之间抖的（念唱音不稳、GAME 扒抖了）——
    第一次没加这条（r07，弃用），把主歌里 6 句稳稳唱在 G3 上、只有一两个真不一样的也拉平了。
+   **10-04《由》**：「GAME 扒抖了」以前是假设，现在用录音验（pyin，只在这一句上跑）—— 一个音「唱在扒出来的音上」= 中段有声 ≥ 一半、
+   pyin 音高四舍五入就是它。整句带字的音 ≥ 60% 这样、并且离主音一个半音的那些去掉真唱的以后抖的不够数 → 是旋律、不是念唱，不动、单独列出来。
+   《由》那 8 句（B3 A#3 B3 A#3 B3 B3 + 往下落，后面 E4 D#4 一样的形状）每句 0.83–1.0 唱在扒出来的音上；
+   《刽子手》第 1、12 行（创作者认的念唱）一半左右没声、有声的音高飘在半音中间（67.29、67.39……），照旧是念唱。
+   只验邻音不够（第一次这样试，《刽子手》第 1 行 3 个邻音里 2 个 pyin 也量得到，被放过了 —— 回归抓到的）。
 
 4.「下一句的第一个字跑到上一句末尾了」（创作者 09-30 指出 r04 的 2:02、2:27 两处）：上一句末字被 GAME 切成两段、下一句第一个字 GAME 又没扒到音，
    对齐时就把它塞进了上一句末尾那段。认法：一行的第一个字落在「紧贴上一句、后面紧跟着一段空档（≥ 0.35 秒）」的音上，而这行第二个字在空档后面，
@@ -43,6 +48,12 @@ LINE_MIN_MATCH = 0.25
 LONG_SPLIT_SEC = 3.0
 CONTIG = 0.03
 CHANT_GAP, CHANT_MIN_NOTES, CHANT_SYLLABIC, CHANT_MAX_BEATS = 0.25, 6, 0.7, 0.6
+CHANT_REAL_VOICED, PROBE_PAD = 0.5, 0.3                 # 一个音算「唱在扒出来的音上」：中段（20–80%）有声 ≥ 一半、pyin 四舍五入就是它；pyin 前后多读 0.3 秒
+CHANT_SUNG_SHARE = 0.6                                  # 整句带字的音里这样的 ≥ 60% 才算稳稳唱的（《由》8 句 0.83–1.0；《刽子手》第 1 行 0.25）
+# 10-06《刽子手》重翻（创作者「还是吟唱的问题」）：第 12 行这次 GAME 扒得散（65–69），被「离主音远的超过 1/4」挡掉没认出来。
+# 原唱里念唱是说出来的：唱在扒出来的音上的 < 40%（第 1、12 行都是 0.25；其余 26 句 ≥ 0.75），扒出来的音又挤在 5 个半音以内
+# （2:04 齐唱那段两个八度一起唱、pyin 也量不准，0.21，但音域 19，不算）→ 不管 GAME 扒得多散都算念唱
+CHANT_SPOKEN_ON, CHANT_SPOKEN_RANGE = 0.4, 5
 REST_SEC = 0.35
 INITIALS = ("zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "r", "z", "c", "s", "y", "w")
 fmt = lambda s: f"{int(s // 60)}:{s % 60:05.2f}"                                   # noqa: E731
@@ -132,12 +143,37 @@ def phrases(notes: list[tuple]) -> list[list[int]]:
     return out
 
 
-def chant(notes: list[tuple], beat_sec, all_one: bool = False) -> tuple[list[tuple], list[str]]:
+def pitch_probe(vocal_wav: str):
+    """→ probe([(起, 长), ...]) → 每个音 (中段有声的比例, 中段音高的中位数（MIDI，小数）或 None)。
+    只读这几个音前后那一小段跑 pyin（16 kHz、10 ms 一帧），整首不跑。"""
+    import librosa
+    import numpy as np
+
+    def probe(spans: list[tuple[float, float]]) -> list[tuple[float, float | None]]:
+        lo = max(0.0, min(s for s, _ in spans) - PROBE_PAD)
+        hi = max(s + d for s, d in spans) + PROBE_PAD
+        y, sr = librosa.load(vocal_wav, sr=16000, mono=True, offset=lo, duration=hi - lo)
+        f0, voiced, _ = librosa.pyin(y, fmin=65, fmax=1100, sr=sr, frame_length=1024, hop_length=160)
+        t = lo + np.arange(len(f0)) * 160 / sr
+        midi = librosa.hz_to_midi(f0)
+        out = []
+        for s, d in spans:
+            m = (t >= s + 0.2 * d) & (t <= s + 0.8 * d)
+            v = midi[m][~np.isnan(midi[m])]
+            out.append((float(np.mean(voiced[m])) if m.sum() else 0.0, float(np.median(v)) if len(v) >= 2 else None))
+        return out
+    return probe
+
+
+def chant(notes: list[tuple], beat_sec, all_one: bool = False, probe=None, kept: list | None = None) -> tuple[list[tuple], list[str]]:
     """beat_sec(秒) → 那一刻一拍多少秒。→ (新的音, 改了什么)。
     all_one（创作者 09-30 晚：「如果识别为念唱（保守识别），就全部用一个音，然后让创作者自己调」）：认出来的整句全部用主音、去掉音分微调；
-    不给就是先前那版（离主音 1 个半音的拉回、离得远的留着）。认法两版一样。"""
+    不给就是先前那版（离主音 1 个半音的拉回、离得远的留着）。认法两版一样。
+    probe（pitch_probe 给的；只在 all_one 时用）：拿录音验「GAME 扒抖了」—— 整句大多稳稳唱在扒出来的音上、邻音也是真唱的就不是念唱；
+    因此不算念唱的句子写进 kept。"""
     notes = sorted(notes)
     out, log = list(notes), []
+    pending = []                                                  # all_one 认出来的句：先记下，主音整首一起定（见循环后）
     for ph in phrases(notes):
         # 只看带字的音（拖音「-」、写成韵母的接续不算）：《刽子手》第 1 行夹着 3 个拖音，一起算就认不出
         sung = [k for k in ph if notes[k][3] not in ("-", "") and vowel_of(notes[k][3]) != notes[k][3]]
@@ -151,20 +187,32 @@ def chant(notes: list[tuple], beat_sec, all_one: bool = False) -> tuple[list[tup
         med = statistics.median(vals)
         tone = max(cnt, key=lambda p: (cnt[p], -abs(p - med), p))
         far = [k for k in sung if abs(ps[k] - tone) >= 2]
-        if len(far) > len(sung) // 4:
-            continue
         jit = [k for k in sung if abs(ps[k] - tone) == 1]
-        if all_one and (len(jit) < 2 or len(jit) < 0.25 * len(sung)):
+        got, on, spoken = None, set(), False
+        if all_one and probe is not None:
+            got = dict(zip(sung, probe([(notes[k][0], notes[k][1]) for k in sung])))
+            on = {k for k, (vf, m) in got.items() if vf >= CHANT_REAL_VOICED and m is not None and abs(m - ps[k]) < 0.5}
+            spoken = len(on) < CHANT_SPOKEN_ON * len(sung) and max(vals) - min(vals) <= CHANT_SPOKEN_RANGE
+        if len(far) > len(sung) // 4 and not spoken:
+            continue
+        if all_one and (len(jit) < 2 or len(jit) < 0.25 * len(sung)) and not spoken:
             # 保守识别（「全部用一个音」时才要）：念唱的音不稳，GAME 会在主音上下一个半音之间来回扒（《刽子手》第 1 行 4 个、第 12 行 3 个）；
             # 稳稳唱在一个音上、只有一两个真不一样的（主歌 0:18、0:21、0:25、0:40、1:41、1:45 都是 G3 上 + 一两个 A3 / A#3，创作者都没改）不是念唱
             continue
         span = f"{fmt(notes[ph[0]][0])}–{fmt(notes[ph[-1]][0] + notes[ph[-1]][1])}"
+        ms = [m for vf, m in got.values() if m is not None] if got is not None else []
+        if got is not None and not spoken:
+            # 10-04《由》：整句稳稳唱在扒出来的音上、邻音也是真唱的 → 是旋律、不是抖。两条都要：
+            # 只看邻音不够 ——《刽子手》第 1 行（念唱）3 个邻音里 2 个 pyin 也量得到，但整句一半没声、音高飘在半音中间，落在扒出来的音上的只有 2/8
+            left = len([k for k in jit if k not in on])
+            if (left < 2 or left < 0.25 * len(sung)) and len(on) >= CHANT_SUNG_SHARE * len(sung):
+                if kept is not None:
+                    kept.append(f"{span} 像念唱（带字的 {len(sung)} 个、主音 {name(tone)}），但原唱里 {len(on)} 个稳稳唱在扒出来的音上（pyin），"
+                                f"离主音一个半音的 {len(jit)} 个里 {len(jit) - left} 个是真唱的 → 是旋律，不动")
+                continue
         if all_one:
-            changed = [k for k in ph if out[k][2] != tone * 100.0]
-            for k in ph:
-                s, d, c, ly = out[k]
-                out[k] = (s, d, float(tone * 100), ly)
-            log.append(f"{span} 念唱（带字的 {len(sung)} 个）：整句 {len(ph)} 个音全部用主音 {name(tone)}（改了 {len(changed)} 个），要你自己调")
+            how = f"；原唱里是说出来的（落在扒出来的音上的只有 {len(on)}/{len(sung)}）" if spoken else ""
+            pending.append({"ph": ph, "sung": len(sung), "tone": tone, "ms": ms, "span": span, "how": how})
             continue
         changed, last = [], None
         for k in ph:                                              # 带字的：离主音 1 个半音的拉回；拖音：跟着前一个字（句首的归主音）
@@ -180,6 +228,29 @@ def chant(notes: list[tuple], beat_sec, all_one: bool = False) -> tuple[list[tup
                 changed.append(k)
         if changed:
             log.append(f"{span} 念唱（带字的 {len(sung)} 个、主音 {tone}）：改了音高 {len(changed)} 个，留着不一样的 {len(far)} 个")
+    # 主音照原唱量（10-06《刽子手》重翻）：念唱里 GAME 扒的音是散的，挑最多的那个会差半音（第 1 行这次挑成 G4、r08 是 G#4）。
+    # 原唱 pyin 每个音中段的中位数：一句里只有几个量得到、正好落在两个半音中间（第 12 行切音稍动一点就 67.4 / 68.2 来回），
+    # 所以一首歌里念唱的句子（各句 GAME 主音相差 ≤ 2 个半音，即同一个调）合在一起取中位、用同一个主音；量不到 3 个就照 GAME 挑的
+    if pending:
+        groups, cur = [], [pending[0]]
+        for g in pending[1:]:
+            if abs(g["tone"] - cur[0]["tone"]) <= 2:
+                cur.append(g)
+            else:
+                groups.append(cur)
+                cur = [g]
+        groups.append(cur)
+        for grp in groups:
+            ms = [m for g in grp for m in g["ms"]]
+            shared = int(round(statistics.median(ms))) if len(ms) >= 3 else None
+            for g in grp:
+                tone = shared if shared is not None else g["tone"]
+                changed = [k for k in g["ph"] if out[k][2] != tone * 100.0]
+                for k in g["ph"]:
+                    s, d, c, ly = out[k]
+                    out[k] = (s, d, float(tone * 100), ly)
+                src = f"；主音照原唱量（{len(grp)} 句一起，{len(ms)} 个音的中位 {statistics.median(ms):.1f}）" if shared is not None else ""
+                log.append(f"{g['span']} 念唱（带字的 {g['sung']} 个{g['how']}{src}）：整句 {len(g['ph'])} 个音全部用主音 {name(tone)}（改了 {len(changed)} 个），要你自己调")
     return out, log
 
 
@@ -248,6 +319,70 @@ def fix_line_starts(notes: list[tuple], line_lens: list[int], pys: list[str], be
         st, d, c, _ = notes[k1]
         notes.insert(k1, [st - dur, dur, c, ly])
     return [tuple(n) for n in notes], log, hand
+
+
+REPEAT_MIN_RUN = 6        # 重复段八度提示：连着至少这么多个字一样才算同一段
+
+
+def repeat_octave(notes: list[tuple]) -> tuple[list[tuple], list[str]]:
+    """10-07《公主》创作者手改 r02：最后一段副歌 30 个音往上挪了一个八度，大多是「跟升调后的第一段副歌一致」（原唱那里其实唱低八度）。
+    后面一段歌词和前面某段连着 ≥ REPEAT_MIN_RUN 个字一样，先扣掉两段整体差几个半音（比如升调 +2），某个音和**第一遍**差一个八度 → 改成第一遍的八度，并列出来。
+    只和第一遍比：拿中间那遍比（它自己可能就是错的）时《公主》对 18 错 5、《刽子手》齐唱段误报 3；只和第一遍比之后《公主》对 12 错 1、《刽子手》0 处。
+    创作者 10-07 先要「只列出来」，看了说「MIDI 还是和之前一样」→ 改成直接改（说明.md 里逐条列，不对就改回去）。
+    notes：[(起, 长, 音分, 字)]（挑八度之后、吸格线之前）→ (改过的音, 每处改了什么)。"""
+    order = sorted(range(len(notes)), key=lambda k: notes[k][0])
+    idx = [k for k in order if notes[k][3] not in ("-", "")]
+    ly = [notes[k][3] for k in idx]
+    pit = {k: int(round(notes[k][2] / 100)) for k in idx}
+    n, compared, change = len(idx), set(), {}
+    for i in range(n):
+        for j in range(i + REPEAT_MIN_RUN, n):
+            L = 0
+            while j + L < n and i + L < j and ly[i + L] == ly[j + L]:
+                L += 1
+            if L < REPEAT_MIN_RUN:
+                continue
+            a = [pit[idx[i + t]] for t in range(L)]
+            b = [pit[idx[j + t]] for t in range(L)]
+            shift = statistics.median([((y - x + 6) % 12) - 6 for x, y in zip(a, b)])
+            for t in range(L):
+                k = idx[j + t]
+                if k in compared:
+                    continue
+                compared.add(k)
+                want = a[t] + shift
+                if abs(pit[k] - want) in (11, 12, 13):
+                    change[k] = (12 if want > pit[k] else -12, idx[i + t], a[t], shift)
+    out, log = list(notes), []
+    for k in sorted(change, key=lambda k: notes[k][0]):
+        dlt, k0, p0, shift = change[k]
+        s, d, c, l = notes[k]
+        out[k] = (s, d, c + 100.0 * dlt, l)
+        log.append(f"{fmt(s)}「{l}」{name(pit[k])} → {name(pit[k] + dlt)}：同样的歌词第一遍在 {fmt(notes[k0][0])}（{name(p0)}"
+                   f"{f'，两段整体差 {shift:+g} 个半音' if shift else ''}）")
+    return out, log
+
+
+def selftest_repeat() -> list[str]:
+    """一段 8 个字唱两遍、第二遍升 2 个半音，中间两个字第二遍扒低了一个八度 → 正好改这两个（改高一个八度）；第三遍照第一遍比、不和第二遍比。"""
+    lys = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    p1 = [60, 62, 64, 65, 67, 69, 71, 72]
+    notes = [(k * 0.5, 0.4, p * 100.0, l) for k, (l, p) in enumerate(zip(lys, p1))]
+    p2 = [p + 2 for p in p1]
+    p2[3] -= 12
+    p2[5] -= 12
+    notes += [(10 + k * 0.5, 0.4, p * 100.0, l) for k, (l, p) in enumerate(zip(lys, p2))]
+    notes += [(20 + k * 0.5, 0.4, (p + 2) * 100.0, l) for k, (l, p) in enumerate(zip(lys, p1))]   # 第三遍是对的
+    notes += [(30, 0.4, 4000.0, "z")]
+    got, log = repeat_octave(notes)
+    fails = []
+    want = {11: 1200.0, 13: 1200.0}
+    for k, (n0, n1) in enumerate(zip(notes, got)):
+        if n1[2] - n0[2] != want.get(k, 0.0):
+            fails.append(f"重复段八度：第 {k} 个音该改 {want.get(k, 0.0)}，实际 {n1[2] - n0[2]}")
+    if len(log) != 2:
+        fails.append(f"重复段八度：该列 2 处，列了 {len(log)}：{log}")
+    return fails
 
 
 def selftest() -> list[str]:
@@ -342,6 +477,40 @@ def selftest() -> list[str]:
         got, _ = chant(mk(ps_), beat, all_one=True)
         if [int(g[2] // 100) for g in got] != ps_:
             fails.append(f"全部用一个音时，{why}被当成念唱了")
+    # 10-04《由》1:21 那句：B3 A#3 B3 A#3 B3 B3 G3 —— 不看录音会被认成念唱；看录音分三种
+    you = [59, 58, 59, 58, 59, 59, 55]
+    ny = mk(you)
+    at = {round(s, 6): c / 100 for s, _, c, _ in ny}
+    sung_p = lambda spans: [(1.0, at[round(s, 6)]) for s, _ in spans]              # noqa: E731  真唱在扒出来的音上
+    mute_p = lambda spans: [(0.1, None) for _ in spans]                            # noqa: E731  几乎没声
+    tone_p = lambda spans: [(1.0, 59.1) for _ in spans]                            # noqa: E731  其实唱在主音上，GAME 扒抖了
+    wander_p = lambda spans: [(1.0, at[round(s, 6)]) if at[round(s, 6)] == 58 else (0.0, None) if k % 2 else (1.0, 58.4)  # noqa: E731
+                              for k, (s, _) in enumerate(spans)]                   # 《刽子手》第 1 行那样：邻音量得到，别的没声或飘在半音中间
+    got, _ = chant(ny, beat, all_one=True)
+    if any(g[2] != 5900.0 for g in got):
+        fails.append(f"不给录音时《由》那句该照旧认成念唱：{[g[2] for g in got]}")
+    kept: list[str] = []
+    got, log = chant(ny, beat, all_one=True, probe=sung_p, kept=kept)
+    if [int(g[2] // 100) for g in got] != you or log or len(kept) != 1:
+        fails.append(f"邻音在录音里是真唱的，却被当成念唱拉平了：{[int(g[2] // 100) for g in got]} {kept}")
+    for p_, why in ((mute_p, "录音里几乎没声"), (tone_p, "录音里唱在主音上"), (wander_p, "邻音量得到、整句飘着")):
+        got, _ = chant(ny, beat, all_one=True, probe=p_)
+        # 10-06 起主音照原唱 pyin 的中位数（wander_p 量出来在 58 一带 → 58）；这里只验「认出来了、整句一个音」
+        if len({g[2] for g in got}) != 1 or got[0][2] not in (5800.0, 5900.0):
+            fails.append(f"{why}的念唱没认出来：{[g[2] for g in got]}")
+    # 10-06 主音照原唱量：GAME 挑最多的是 59，原唱整句在 60.2 一带 → 用 60
+    got, _ = chant(ny, beat, all_one=True, probe=lambda spans: [(1.0, 60.2) for _ in spans])
+    if any(g[2] != 6000.0 for g in got):
+        fails.append(f"主音没照原唱量：{[g[2] for g in got]}")
+    # 10-06《刽子手》第 12 行：GAME 扒得散（离主音 2 个半音以上的超过 1/4）、原唱是说出来的 → 也算念唱
+    scat = [(s, d, float(p * 100), ly) for (s, d, _, ly), p in zip(ny, [59, 62, 57, 59, 61, 58, 59])]   # 音域 5、离 59 两个半音以上的 3 个
+    spoke = lambda spans: [(0.2, None) if k % 3 else (1.0, 60.3) for k, _ in enumerate(spans)]   # noqa: E731  大多没声，有声的飘在扒出来的音之间
+    got, log = chant(scat, beat, all_one=True, probe=spoke)
+    if len({g[2] for g in got}) != 1 or not log or "说出来的" not in log[0]:
+        fails.append(f"扒得散、原唱是说出来的念唱没认出来：{[g[2] for g in got]} {log}")
+    got, log = chant(scat, beat, all_one=True)
+    if log:
+        fails.append(f"不给录音时扒得散的句子不该认成念唱：{log}")
     return fails
 
 

@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import copy
 import json
 import pathlib
@@ -25,6 +26,7 @@ import numpy as np
 
 sys.stdout.reconfigure(encoding="utf-8")
 HERE = pathlib.Path(__file__).resolve().parent
+VOCAL_GAIN_DB, ACCOMP_GAIN_DB = 3.5, 1.7        # 创作者 10-04：星尘 +3.5 dB、伴奏 +1.7 dB（比模板原来的）
 for sub in ("m1-02-harmony", "m1-03-lyrics", "m5-00-beat-grid"):
     sys.path.insert(0, str(HERE.parent / sub))
 sys.path.insert(0, str(HERE))
@@ -32,11 +34,13 @@ import beat_grid as BG                                          # noqa: E402
 import clean_lyrics as LC                                       # noqa: E402
 import compare_notes as C                                       # noqa: E402
 import cover_rules as CR                                        # noqa: E402
+import key_scale as KS                                          # noqa: E402
 import eval_lyrics as E                                         # noqa: E402
 import grid_check as GC                                         # noqa: E402
 import pick_octave as P                                         # noqa: E402
 import quantize_melody as QM                                    # noqa: E402
 import repair_lyrics as RL                                      # noqa: E402
+import lyric_fuse as LF                                         # noqa: E402
 import retime_svp as RT                                         # noqa: E402
 
 Q = BG.Q
@@ -146,7 +150,7 @@ def blicks_of(r: dict, tempo: list[dict]) -> tuple[int, int]:
     return a, max(1, round(RT.seconds_to_blick(r["q_off_s"], tempo)) - a)
 
 
-def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_svp: pathlib.Path) -> dict:
+def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_svp: pathlib.Path, scale: dict | None = None) -> dict:
     d0 = C.load_svp(cfg["template"])
     d = RT.retime(d0, {"meter": [{"index": 0, "numerator": 4, "denominator": 4}], "tempo": tempo})
     tmpl = next(t for t in d["tracks"] if t.get("name") == cfg["vocal_template_track"])
@@ -172,11 +176,18 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
     # 《潮声回响》r01–r05 只设了前一处，扒谱那条从模板人声轨继承了混音台静音，打开时听不到
     for t in d["tracks"]:
         t["mixer"]["solo"] = False
+    # 音量（创作者 10-04「翻唱曲声音太小了，星尘声音要提高3.5db，乐器声音提高1.7db」）：比模板原来的各加这么多
+    for t in d["tracks"]:
+        if t["mainRef"].get("audio") and not t["mainRef"].get("mute"):
+            t["mixer"]["gainDecibel"] = float(t["mixer"].get("gainDecibel", 0.0)) + ACCOMP_GAIN_DB
     ours = copy.deepcopy(tmpl)
     ours["name"] = track_name
+    ours["mixer"]["gainDecibel"] = float(tmpl.get("mixer", {}).get("gainDecibel", 0.0)) + VOCAL_GAIN_DB
     ours["mainRef"]["mute"] = ours["mixer"]["mute"] = False
     ours["mainRef"]["uuid"] = str(uuid.uuid4())
     ours["mainGroup"] = {**copy.deepcopy(tmpl["mainGroup"]), "uuid": str(uuid.uuid4()), "notes": [], "pitchControls": []}
+    if scale:                                                    # 10-07：调式音阶照测出来的调（只影响 SynthV 里的音阶参考线）
+        ours["mainGroup"]["musicalScale"] = {"type": scale["type"], "root": scale["root"]}
     ours["mainRef"]["groupID"] = ours["mainGroup"]["uuid"]
     ours["mainRef"]["blickOffset"] = 0
     ours["groups"] = []
@@ -208,7 +219,8 @@ def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_s
     for i, t in enumerate(d["tracks"]):
         t["dispOrder"] = i
     d["uuid"] = str(uuid.uuid4())
-    d["renderConfig"].update(destination=str(out_svp.parent / "render").replace("\\", "/"), filename=out_svp.stem)
+    # 10-08《公主》PV：创作者「感觉声音有点糊」→ 模板的导出设置是单声道，原曲伴奏（立体声，侧声道约 −9 dB）被压到正中间、和人声挤在一起 → 导出改成双声道
+    d["renderConfig"].update(destination=str(out_svp.parent / "render").replace("\\", "/"), filename=out_svp.stem, numChannels=2)
     return d
 
 
@@ -282,12 +294,20 @@ def main(cfg_path: str) -> int:
           + (f"；和下一个音重叠的 {n_cut} 个，结尾截到下一个音开头" if n_cut else ""))
     rule_log: dict[str, list] = {}
     kept_lens: list[int] | None = None                           # 放进主唱的每行字数（新规矩 4 用）
+    aligned = None                                               # 「给原歌词」那版的音（强制对齐，只拿时间）
     if cfg.get("lyrics"):
         chars, pys = E.text_pinyin(cfg["lyrics"])
         fails = RL.selftest(chars, pys)
         if fails:
             print("修歌词的自检不过：", fails)
             return 1
+        # 10-06《公主》：有「给原歌词」那版（强制对齐）就按时间 + 听到的拼音一起放字（lyric_fuse），没有就照旧整首拼音对齐
+        aligned = E.load(cfg["v2m_lyrics_mid"]) if cfg.get("v2m_lyrics_mid") else None
+        if aligned is not None:
+            fails = LF.selftest() + RL.selftest_times()
+            if fails:
+                print("歌词落位 v2 的自检不过：", fails)
+                return 1
         lyr_used = cfg["lyrics"]
         if cfg.get("rules_0930"):                                # 09-30 新规矩 1：和听写几乎对不上的行整行不放
             fails = CR.selftest()
@@ -295,7 +315,10 @@ def main(cfg_path: str) -> int:
                 print("新规矩的自检不过：", fails)
                 return 1
             lines = LC.clean_lines(open(cfg["lyrics"], encoding="utf-8").read())
-            rates = CR.line_match(lines, RL.A.align(pys, [n[3] for n in notes0], [n[1] for n in notes0]))
+            if aligned is not None:
+                rates = LF.line_rates(lines, *LF.fuse_ops(pys, notes0, aligned))
+            else:
+                rates = CR.line_match(lines, RL.A.align(pys, [n[3] for n in notes0], [n[1] for n in notes0]))
             keep, drop = CR.drop_unsung(lines, rates)
             starts = np.cumsum([0] + [len(ln) for ln in lines])
             chars = [ch for li in keep for ch in chars[starts[li]:starts[li + 1]]]
@@ -307,7 +330,14 @@ def main(cfg_path: str) -> int:
             lyr_used.write_text("\n".join(lines[li] for li in keep) + "\n", encoding="utf-8")
             print(f"和听写对不上（对上的字不到 {CR.LINE_MIN_MATCH:.0%}）、整行不放的：{len(drop)} 行 —— "
                   + "；".join(f"第 {d['行']} 行（{d['字数']} 字）" for d in rule_log["拿掉的行"]))
-        fixed, log = RL.repair(notes0, chars, pys)
+        if aligned is not None:
+            ops, _ = LF.fuse_ops(pys, notes0, aligned)
+            at, anch = LF.anchors(pys, aligned)
+            fixed, log = RL.repair(notes0, chars, pys, ops=ops, times=LF.split_times(at, anch))
+        else:
+            fixed, log = RL.repair(notes0, chars, pys)
+        if aligned is not None:
+            print(f"歌词落位：按时间 + 听到的拼音一起放（强制对齐 {pathlib.Path(cfg['v2m_lyrics_mid']).name} 当时间锚点）")
         acts = {}
         for x in log:
             acts[x["动作"]] = acts.get(x["动作"], 0) + 1
@@ -327,7 +357,18 @@ def main(cfg_path: str) -> int:
         before_lyr = after_lyr = {"说明": "没给歌词：只用听写出来的字（拼音），不修"}
         print(f"扒出 {len(notes0)} 个音；没给歌词 —— 字用听写出来的，不修")
 
-    if cfg.get("octave_pick", True):
+    if cfg.get("octave_pick", True) and aligned is not None:
+        # 10-06：照强制对齐放字会切音、补音，挑八度按句看 → 句子里多了音，原来的音的八度跟着变（《公主》1:09 整句掉了一个八度）。
+        # 创作者：「midi 识别可以」→ 八度照原来的音挑；切出来 / 补出来的音跟着它所在的（补的是前一个）原来的音
+        _, new0, why0, other0 = P.pick(notes0, cfg["vocal_stem"], cfg["bp_raw"])
+        ps0 = [int(round(c / 100)) for _, _, c, _ in notes0]
+        starts0 = [n[0] for n in notes0]
+        host = [max(0, bisect.bisect_right(starts0, s + 1e-6) - 1) for s, _, _, _ in fixed]
+        shift = [new0[h] - ps0[h] for h in host]
+        picked = [(s, d, c + 100.0 * shift[k], ly) for k, (s, d, c, ly) in enumerate(fixed)]
+        new = [int(round(c / 100)) + shift[k] for k, (_, _, c, _) in enumerate(fixed)]
+        why, other = [why0[h] for h in host], [other0[h] for h in host]
+    elif cfg.get("octave_pick", True):
         picked, new, why, other = P.pick(fixed, cfg["vocal_stem"], cfg["bp_raw"])
     else:                                                        # 10-01 晚：对照用 —— 不挑八度，音高全照 Vocal2Midi（六首里挑八度 126 个只改对 1 个）
         picked, why, other = list(fixed), ["原样（这一版不挑八度）"] * len(fixed), [False] * len(fixed)
@@ -343,11 +384,24 @@ def main(cfg_path: str) -> int:
             key = "下一句的第一个字跑到上一句末尾"
             print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
         picked, rule_log["同音高的接续"] = CR.same_pitch(picked)
+        kept: list[str] = []
         picked, rule_log["念唱"] = CR.chant(picked, lambda s: 60.0 / bpm_at(tempo, s),
-                                           all_one=int(cfg["rules_0930"]) >= 3)    # ≥ 3：认出来的念唱全部用一个音（09-30 晚）
-        for k in ("同音高的接续", "念唱"):
+                                           all_one=int(cfg["rules_0930"]) >= 3,    # ≥ 3：认出来的念唱全部用一个音（09-30 晚）
+                                           probe=CR.pitch_probe(cfg["vocal_stem"]) if cfg.get("vocal_stem") else None,
+                                           kept=kept)                             # 10-04：「GAME 扒抖了」拿录音验
+        rule_log["像念唱、其实是旋律（不动）"] = kept
+        for k in ("同音高的接续", "念唱", "像念唱、其实是旋律（不动）"):
             print(f"{k}：{len(rule_log[k])} 处" + "".join(f"\n    {x}" for x in rule_log[k]))
 
+    # 10-07：重复段（同样的歌词）八度照第一遍改（创作者看了只列提示的版本说「MIDI 还是和之前一样」）；吸格线前那份也跟着改
+    fails_r = CR.selftest_repeat()
+    if fails_r:
+        print("重复段八度的自检不过：", fails_r)
+        return 1
+    repeat_log: list[str] = []
+    if cfg.get("lyrics") and cfg.get("repeat_octave", True):
+        picked, repeat_log = CR.repeat_octave(picked)
+    print(f"重复段八度照第一遍改：{len(repeat_log)} 处" + "".join(f"\n    {x}" for x in repeat_log))
     raw_rows = [{"i": i, "lyric": n[3], "pitch": int(round(n[2] / 100)), "cents": float(n[2]), "on_s": n[0], "off_s": n[0] + n[1],
                  "q_on_s": n[0], "q_off_s": n[0] + n[1], "k16": None, "dur16": None, "flags": []}
                 for i, n in enumerate(picked)]
@@ -361,10 +415,17 @@ def main(cfg_path: str) -> int:
     print(f"吸格线：{len(g)} / {len(rows)} 个音在有速度的段里吸了；整体偏移 {bias * 1000:+.1f}（千分之一拍，先扣掉）；"
           f"起音挪了中位 {np.median(shifts):.1f} ms、最多 {shifts.max():.1f} ms；标记 {flags}")
 
+    # 10-07 创作者「两个都加上」：调式音阶自动设、重复段八度只列出来
+    fails_k = KS.selftest()
+    if fails_k:
+        print("调式 / 重复段提示的自检不过：", fails_k)
+        return 1
+    scale = KS.detect([KS.melody_hist(picked), KS.accomp_hist(cfg["accomp"])])
+    print(f"调式音阶：{scale['说明']}（旋律 + 伴奏一起测，得分 {scale['得分']}）")
     rnd_dir.mkdir(parents=True, exist_ok=True)
     name_q, name_raw = f"扒谱 {cfg['round']}（第一版 · 吸格线）", f"扒谱 {cfg['round']}（吸格线前）"
     for path, rr, nm in ((out_svp, rows, name_q), (before_svp, raw_rows, name_raw)):
-        path.write_text(json.dumps(build(cfg, tempo, rr, nm, path), ensure_ascii=False), encoding="utf-8")
+        path.write_text(json.dumps(build(cfg, tempo, rr, nm, path, scale), ensure_ascii=False), encoding="utf-8")
         f = check(path, cfg, tempo, rr, nm)
         print(f"写出 {path}\n  自检（读回来）：", "通过" if not f else "不通过")
         for x in f:
@@ -390,6 +451,7 @@ def main(cfg_path: str) -> int:
     res = {"config": cfg, "notes_v2m": len(notes0), "lyrics_chars": len(chars), "repair_actions": acts, "repair_log": log,
            "lyrics_before": before_lyr, "lyrics_after": after_lyr, "sung_differently": diff,
            "octave": {"doubled_notes": doubled, "changed": len(changed), "why": why}, "rules_0930": rule_log,
+           "scale": scale, "repeat_octave": repeat_log,
            "snap": {"bias_beats_x1000": round(bias * 1000, 1), "flags": flags, "shift_ms_median": float(np.median(shifts)),
                     "shift_ms_max": float(shifts.max())}, "rows": rows, "grid_check": tabs}
     (rnd_dir / f"{cfg['name']}_扒谱_{cfg['round']}.json").write_text(

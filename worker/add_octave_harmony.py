@@ -24,6 +24,7 @@ import secrets
 import sys
 
 BLICK = 705600000           # 一拍（四分音符）
+EDGE = 0.001                # 按句子取时两头的余量（秒）：逐字时间四舍五入到毫秒
 
 
 def blick_to_sec(svp: dict):
@@ -198,7 +199,9 @@ def main() -> int:
                 lo, hi = by_no[x].get("开始"), by_no[y].get("结束")
                 if lo is None or hi is None:
                     return fail(f"第 {x}–{y} 句在工程里对不上音（没有时间）")
-                sections.append((lo, hi))
+                # 逐字时间是四舍五入到毫秒的（差 ≤ 0.5 ms）：两头都往前挪 1 ms —— 不漏这一段第一个音、也不带上下一句紧挨着的第一个音
+                # （10-04《由》第三段：开始记成 177.747，那个音其实在 177.7466，比开始早、没复制上）
+                sections.append((lo - EDGE, hi - EDGE))
     except ValueError as e:
         return fail(str(e))
     if not sections:
@@ -221,7 +224,7 @@ def main() -> int:
     above = harmony_track(main_t, picked, +12, "和声 · 上八度" + ("" if a.on == "above" else "（静音，想要就打开）"), a.on != "above", a.gain, order + 1)
     svp["tracks"] += [below, above]
     # 导出设置指向这一版自己（和 song_round.py 一样）：第一版照抄了来源的，《怪物》r03 在 SV 里导出会落进 r01\render、文件名带 r01
-    svp["renderConfig"].update(destination=str(out.parent / "render").replace("\\", "/"), filename=out.stem)
+    svp["renderConfig"].update(destination=str(out.parent / "render").replace("\\", "/"), filename=out.stem, numChannels=2)   # 10-08：单声道导出会糊（见 song_round）
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(svp, ensure_ascii=False), encoding="utf-8")
     name = lambda p: ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][p % 12] + str(p // 12 - 1)

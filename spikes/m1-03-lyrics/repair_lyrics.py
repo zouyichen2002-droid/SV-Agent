@@ -30,13 +30,20 @@ import lyric_align as A  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 SPLIT_MIN_SEC = 0.3
+TIME_SPLIT_MIN_SEC = 0.06    # 照强制对齐的时间切音时，切出来的每一段至少这么长（10-06）
+GAP_FILL_MIN_SEC, GAP_FILL_MAX_SEC = 0.1, 0.25   # 字的时间落在两个音中间的空档里：空档至少这么长才补一个音，补的音最长这么长
 OUT = pathlib.Path("E:/sv-agent-data/probes/m1-03-lyrics")
 fmt = lambda s: f"{int(s // 60)}:{s % 60:05.2f}"
 
 
-def repair(notes: list, chars: list[str], pys: list[str]) -> tuple[list, list[dict]]:
+def repair(notes: list, chars: list[str], pys: list[str], ops: list | None = None,
+           times: list | None = None) -> tuple[list, list[dict]]:
+    """ops：哪个字配哪个音（lyric_align.align 的格式）；不给就整首拼音对齐。10-06 起有强制对齐时由 lyric_fuse.fuse_ops 给（notes 要已经排好序）。
+    times：每个字强制对齐出来的起音（不是锚点的给 None）—— 没地方放的字先照这个时间放（落在拖音上就放上去，落在别的音中间就从那里切开），
+    放不了再走原来的对半拆。"""
     notes = sorted(notes)
-    ops = A.align(pys, [n[3] for n in notes], [n[1] for n in notes])
+    if ops is None:
+        ops = A.align(pys, [n[3] for n in notes], [n[1] for n in notes])
     out: list[list] = [list(n) for n in notes]
     char_of = [None] * len(out)                           # 每个音配上的是歌词里第几个字
     log, pending = [], []
@@ -54,6 +61,48 @@ def repair(notes: list, chars: list[str], pys: list[str]) -> tuple[list, list[di
             pending.append(i)
     # 拆音：没地方放的字，找它前面最近的、已经配了字的音；太短就找后面的
     for i in pending:
+        if times is not None and times[i] is not None:
+            # 10-06《公主》：GAME 在唱得快的地方把几个字并成一个音（副歌里重复的快句），音太短、对半拆不了 →
+            # 强制对齐知道这个字从哪一刻开始：落在拖音上就放上去；落在别的音中间就从那一刻切开（音高不动），后一段给这个字
+            t = times[i]
+            j = next((j for j in range(len(out)) if out[j][0] <= t <= out[j][0] + out[j][1] and char_of[j] is None), None)
+            if j is None:
+                j = next((j for j in range(len(out)) if out[j][0] <= t < out[j][0] + out[j][1] and out[j][1] >= 2 * TIME_SPLIT_MIN_SEC), None)
+                if j is not None:                         # 离音的两头太近 → 切在离头尾至少 TIME_SPLIT_MIN_SEC 的地方
+                    t = min(max(t, out[j][0] + TIME_SPLIT_MIN_SEC), out[j][0] + out[j][1] - TIME_SPLIT_MIN_SEC)
+            if j is None:
+                # 落在两个音中间的空档（GAME 没切出这个字）：空档够长就补一个音，音高照前一个音（没有就照后一个），要创作者听
+                g = next((g for g in range(len(out) + 1)
+                          if (g == 0 or out[g - 1][0] + out[g - 1][1] <= t) and (g == len(out) or t < out[g][0])), None)
+                if g is not None and 0 < g < len(out):
+                    a_, b_ = out[g - 1][0] + out[g - 1][1], out[g][0]
+                    lo = max((char_of[k] for k in range(g) if char_of[k] is not None), default=-1)
+                    hi = min((char_of[k] for k in range(g, len(out)) if char_of[k] is not None), default=len(pys))
+                    if b_ - a_ >= GAP_FILL_MIN_SEC and lo < i < hi:
+                        s0 = max(a_, min(t, b_ - GAP_FILL_MIN_SEC))
+                        new = [s0, min(b_ - s0, GAP_FILL_MAX_SEC), out[g - 1][2], pys[i]]
+                        out.insert(g, new)
+                        char_of.insert(g, i)
+                        log.append({"时间": fmt(s0), "动作": "补音（GAME 没切出这个字，音高照前一个音，要你听）", "原来": "",
+                                    "改成": f"{pys[i]}（{chars[i]}，{new[1]:.2f} 秒）"})
+                        continue
+            ok = j is not None
+            if ok:
+                lo = max((char_of[k] for k in range(j) if char_of[k] is not None), default=-1)
+                hi = min((char_of[k] for k in range(j + 1, len(out)) if char_of[k] is not None), default=len(pys))
+                ok = lo < i < hi and (char_of[j] is None or char_of[j] < i)
+            if ok and char_of[j] is None:
+                log.append({"时间": fmt(out[j][0]), "动作": "补空位", "原来": out[j][3], "改成": f"{pys[i]}（{chars[i]}）"})
+                out[j][3], char_of[j] = pys[i], i
+                continue
+            if ok:
+                s, d, c, ly = out[j]
+                out[j] = [s, t - s, c, ly]
+                out.insert(j + 1, [t, s + d - t, c, pys[i]])
+                char_of.insert(j + 1, i)
+                log.append({"时间": fmt(s), "动作": "拆音（字比音多）", "原来": f"{ly}（{d:.2f} 秒）",
+                            "改成": f"{ly} + {pys[i]}（照强制对齐的时间切在 {fmt(t)}：{t - s:.2f} + {s + d - t:.2f} 秒）"})
+                continue
         before = [j for j in range(len(out)) if char_of[j] is not None and char_of[j] < i]
         after = [j for j in range(len(out)) if char_of[j] is not None and char_of[j] > i]
         cand = ([before[-1]] if before else []) + ([after[0]] if after else [])
@@ -75,6 +124,27 @@ def repair(notes: list, chars: list[str], pys: list[str]) -> tuple[list, list[di
         log.append({"时间": fmt(s), "动作": "拆音（字比音多）", "原来": f"{ly}（{d:.2f} 秒）",
                     "改成": f"{first[3]} + {second[3]}（各 {half:.2f} 秒）"})
     return [tuple(n) for n in sorted(out)], log
+
+
+def selftest_times() -> list[str]:
+    """10-06 照强制对齐的时间放字：一个长音里并了两个字 → 照时间切开；一个字落在空档里 → 补一个音；次序不对的不放。"""
+    fails = []
+    pys = ["a", "b", "c", "d"]
+    notes = [(0.0, 0.5, 6000.0, "a"), (1.0, 0.4, 6200.0, "d")]          # b 并在 a 里（0.3 秒处）、c 落在 0.5–1.0 的空档里（0.7 秒）
+    ops = [(0, 0, "一样"), (1, None, "只在A"), (2, None, "只在A"), (3, 1, "一样")]
+    out, log = repair(notes, ["甲", "乙", "丙", "丁"], pys, ops=ops, times=[0.0, 0.3, 0.7, 1.0])
+    if [n[3] for n in out] != pys:
+        fails.append(f"照时间切音 / 补音后的字不对：{[n[3] for n in out]}")
+    elif abs(out[1][0] - 0.3) > 1e-9 or abs(out[0][1] - 0.3) > 1e-9 or out[1][2] != 6000.0:
+        fails.append(f"切的位置或音高不对：{out[:2]}")
+    elif abs(out[2][0] - 0.7) > 1e-9 or out[2][2] != 6000.0:
+        fails.append(f"补的音位置或音高不对：{out[2]}")
+    # 字的时间落在后面那个字的音里（次序反了）→ 不该照时间放
+    out, log = repair(notes, ["甲", "乙", "丙", "丁"], pys, ops=[(0, 0, "一样"), (1, None, "只在A"), (2, None, "只在A"), (3, 1, "一样")],
+                      times=[0.0, 1.2, None, 1.0])
+    if any("照强制对齐" in x["改成"] for x in log):
+        fails.append("次序反了也照时间切了音")
+    return fails
 
 
 def sung_differently(asr_notes: list, chars: list[str], pys: list[str], log: list[dict]) -> list[dict]:

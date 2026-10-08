@@ -364,6 +364,26 @@ def step_v2m(r: Run, lead: pathlib.Path, lang: str = "zh", lyrics: pathlib.Path 
     return mid
 
 
+def step_aligned(r: Run, lead: pathlib.Path, lyrics: pathlib.Path) -> pathlib.Path:
+    """10-06《公主》：中文给了歌词 → 另跑一遍 Vocal2Midi「给原歌词」（HubertFA 按字强制对齐）。它重切的音不用（音准优先），
+    只拿每个字的时间当锚点，生成工程那步按时间 + 听到的拼音一起放字（m1-03-lyrics/lyric_fuse.py）。"""
+    d = r.P / "扒谱"
+    stem = f"{r.name}_v2m_给原歌词_主唱补段"
+    mid = d / f"{stem}.mid"
+    if mid.exists():
+        r.note("强制对齐", "跳过", "扒谱\\ 里已经有了")
+        return mid
+    r.note("强制对齐", "开始", "Vocal2Midi 给原歌词：按字强制对齐，只拿每个字的时间（显卡约 35 秒）")
+    r.run("强制对齐", [r.cfg["vocal2midi_python"], r.spikes / "m1-01-voice-to-midi" / "run_vocal2midi.py", lead, d, stem,
+                    "--lyrics", lyrics, "--language", "zh",
+                    "--device", "dml", "--slicing", "heuristic", "--batch-size", "1", "--asr-batch-size", "1", "--low-priority"],
+          cwd=r.spikes / "m1-01-voice-to-midi")
+    if not mid.exists():
+        raise StepFailed("强制对齐", f"没出 {mid.name}")
+    r.note("强制对齐", "完成", mid.name)
+    return mid
+
+
 def step_bp(r: Run, lead: pathlib.Path) -> pathlib.Path:
     out = r.P / "扒谱" / "basic_pitch_raw_主唱补段.json"
     if out.exists():
@@ -407,7 +427,8 @@ def step_template(r: Run, voice: dict, stems: dict, tm: pathlib.Path) -> pathlib
     return out
 
 
-def step_round(r: Run, voice: dict, tpl, stems, lead, lyrics, mid, bp, tm, lang: str = "zh", octave_pick: bool = True) -> dict:
+def step_round(r: Run, voice: dict, tpl, stems, lead, lyrics, mid, bp, tm, lang: str = "zh", octave_pick: bool = True,
+               aligned: pathlib.Path | None = None) -> dict:
     rdir = r.P / r.round
     rdir.mkdir(exist_ok=True)
     out_svp = rdir / f"{r.name}_扒谱_{r.round}.svp"
@@ -422,6 +443,8 @@ def step_round(r: Run, voice: dict, tpl, stems, lead, lyrics, mid, bp, tm, lang:
         cfg["language"] = lang
     elif lyrics is not None:
         cfg["lyrics"] = str(lyrics)
+        if aligned is not None:
+            cfg["v2m_lyrics_mid"] = str(aligned)
     if not octave_pick:                                          # 创作者 10-01 定：挑八度加开关、默认开（开着时 song.json 和以前一模一样）
         cfg["octave_pick"] = False
     (rdir / "song.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -437,7 +460,8 @@ def step_round(r: Run, voice: dict, tpl, stems, lead, lyrics, mid, bp, tm, lang:
     report = rdir / f"{r.name}_扒谱_{r.round}.json"
     res = json.loads(report.read_text(encoding="utf-8")) if report.exists() else {}
     stats = {"工程": str(out_svp), "扒出的音": res.get("notes_v2m"), "歌词字数": res.get("lyrics_chars"),
-             "改八度": (res.get("octave") or {}).get("changed"), "规矩": res.get("rules_0930")}
+             "改八度": (res.get("octave") or {}).get("changed"), "规矩": res.get("rules_0930"),
+             "调式": (res.get("scale") or {}).get("说明"), "重复段八度": res.get("repeat_octave") or []}
     r.note("生成工程", "完成", out_svp.name)
     return stats
 
@@ -453,7 +477,13 @@ def write_readme(r: Run, source: str, lyrics, stats: dict, lang: str = "zh", oct
               else "- 挑八度：关（这一版音高全照 Vocal2Midi 扒的，没按《傍晚》学来的规矩改八度）"),
              *([f"- 记忆：{prefs_used}"] if prefs_used else []),
              f"- 工程：`{pathlib.Path(stats['工程']).name}`（打开就放伴奏和扒谱；原曲主唱那条静音，点开对照）",
-             f"- 扒出 {stats.get('扒出的音')} 个音；改了 {stats.get('改八度')} 个八度", "",
+             f"- 扒出 {stats.get('扒出的音')} 个音；改了 {stats.get('改八度')} 个八度",
+             *([f"- 调式音阶：{stats['调式']}（测出来的，已设进工程；只影响 SV 里的音阶参考线）"] if stats.get("调式") else []),
+             "",
+             *(["## 重复段八度照第一遍改了（要你听）", "",
+                "同样的歌词前面唱过，这一遍和第一遍差一个八度 → 改成第一遍的八度（两段整体差几个半音先扣掉，比如升调）。"
+                "原唱这一遍也可能真的换了八度 —— 不对就在 SV 里改回去：", "",
+                *[f"- {x}" for x in stats["重复段八度"]], ""] if stats.get("重复段八度") else []),
              "听的时候：觉得哪里不对就直接在 SV 里改、存盘 —— 插件会自动备份你改的样子，下一版照你改的学。"]
     (r.P / r.round / "说明.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -494,6 +524,7 @@ def main() -> int:
         try:
             lead = step_hybrid(r, stems)
             mid = step_v2m(r, lead, lang, lyrics)
+            aligned = step_aligned(r, lead, lyrics) if lang == "zh" and lyrics is not None else None
             bp = step_bp(r, lead)
         except BaseException:
             if started is not None:
@@ -503,7 +534,7 @@ def main() -> int:
         tm = tempo_wait(r, started)
         tpl = step_template(r, voice, stems, tm)
         octave = a.octave_pick == "on"
-        stats = step_round(r, voice, tpl, stems, lead, lyrics, mid, bp, tm, lang, octave)
+        stats = step_round(r, voice, tpl, stems, lead, lyrics, mid, bp, tm, lang, octave, aligned)
         stats["语言"] = LANG_NAMES[lang]
         stats["挑八度"] = "开" if octave else "关"
         if a.prefs_used:
