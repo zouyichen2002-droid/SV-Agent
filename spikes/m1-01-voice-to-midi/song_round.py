@@ -35,6 +35,7 @@ import clean_lyrics as LC                                       # noqa: E402
 import compare_notes as C                                       # noqa: E402
 import cover_rules as CR                                        # noqa: E402
 import key_scale as KS                                          # noqa: E402
+import pitch_rules as PR                                        # noqa: E402
 import eval_lyrics as E                                         # noqa: E402
 import grid_check as GC                                         # noqa: E402
 import pick_octave as P                                         # noqa: E402
@@ -297,7 +298,7 @@ def main(cfg_path: str) -> int:
     aligned = None                                               # 「给原歌词」那版的音（强制对齐，只拿时间）
     if cfg.get("lyrics"):
         chars, pys = E.text_pinyin(cfg["lyrics"])
-        fails = RL.selftest(chars, pys)
+        fails = RL.selftest(chars, pys) + E.selftest_zhe()
         if fails:
             print("修歌词的自检不过：", fails)
             return 1
@@ -377,6 +378,16 @@ def main(cfg_path: str) -> int:
     changed = [k for k in range(len(fixed)) if new[k] != ps[k]]
     doubled = sum(1 for o in other if o)
     print(f"挑八度：录音里两个八度一起唱的音 {doubled} 个，改了八度的 {len(changed)} 个")
+    # 10-08：拿原唱音高（pyin）—— 扒低了一个八度的往上改（只往上）；后面还有一条：音尾滑走的拆成两个音
+    fails_p = PR.selftest()
+    if fails_p:
+        print("原唱音高规矩的自检不过：", fails_p)
+        return 1
+    trk = PR.track(cfg["vocal_stem"]) if cfg.get("vocal_stem") else None
+    if trk is not None and cfg.get("octave_up", True):
+        picked, rule_log["原唱高一个八度，往上改"] = PR.octave_up(picked, trk)
+        key = "原唱高一个八度，往上改"
+        print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
     if cfg.get("rules_0930"):                                    # 09-30 新规矩 2、3：同音高的接续（长音截两段写韵母）、念唱拉平
         if int(cfg["rules_0930"]) >= 2 and kept_lens:            # 新规矩 4（09-30 晚）：下一句的第一个字跑到上一句末尾
             picked, rule_log["下一句的第一个字跑到上一句末尾"], rule_log["要你手放的字"] = CR.fix_line_starts(
@@ -392,6 +403,11 @@ def main(cfg_path: str) -> int:
         rule_log["像念唱、其实是旋律（不动）"] = kept
         for k in ("同音高的接续", "念唱", "像念唱、其实是旋律（不动）"):
             print(f"{k}：{len(rule_log[k])} 处" + "".join(f"\n    {x}" for x in rule_log[k]))
+
+    if trk is not None and cfg.get("split_tail", True):
+        picked, rule_log["音尾滑走，拆成两个音"] = PR.split_tail(picked, trk)
+        key = "音尾滑走，拆成两个音"
+        print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
 
     # 10-07：重复段（同样的歌词）八度照第一遍改（创作者看了只列提示的版本说「MIDI 还是和之前一样」）；吸格线前那份也跟着改
     fails_r = CR.selftest_repeat()

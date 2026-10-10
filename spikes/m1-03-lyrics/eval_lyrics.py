@@ -26,12 +26,34 @@ LYRICS = "E:/sv-agent-data/learn/01-傍晚/lyrics_原文.txt"
 SKIP = ("-", "", "+", "la")
 
 
+ZHE_AFTER = {"落": "zhuo", "手": "zhuo", "想": "zhuo", "陆": "zhuo", "急": "zhao", "火": "zhao", "凉": "zhao", "迷": "zhao"}
+ZHE_BEFORE = {"睡": "zhao", "衣": "zhuo"}
+
+
+def fix_zhe(ln: str, p: list[str]) -> list[str]:
+    """10-08《那些我恐惧至极的事》：转拼音把「…着…」（动词后面的「着」）写成了 zhuo，创作者改成 zhe。
+    歌词里「着」几乎都是助词 zhe → 默认 zhe；只有这几个固定词照它本来的读音（着落 / 着手 / 着想 / 着陆 zhuo，着急 / 着火 / 着凉 / 着迷 / 睡着 zhao）。"""
+    p = list(p)
+    for i, ch in enumerate(ln):
+        if ch != "着":
+            continue
+        nxt, prv = ln[i + 1] if i + 1 < len(ln) else "", ln[i - 1] if i > 0 else ""
+        p[i] = ZHE_AFTER.get(nxt) or ZHE_BEFORE.get(prv) or "zhe"
+    return p
+
+
+def selftest_zhe() -> list[str]:
+    cases = (("看着你", "zhe"), ("拿着歌", "zhe"), ("着急", "zhao"), ("睡着了", "zhao"), ("没有着落", "zhuo"))
+    return [f"「{ln}」的着该读 {want}，写成了 {fix_zhe(ln, ['x'] * len(ln))[ln.index('着')]}"
+            for ln, want in cases if fix_zhe(ln, ["x"] * len(ln))[ln.index("着")] != want]
+
+
 def text_pinyin(path: str) -> tuple[list[str], list[str]]:
     from inference.LyricFA.tools.ZhG2p import ZhG2p
     g = ZhG2p("mandarin")
     chars, pys = [], []
     for ln in L.clean_lines(open(path, encoding="utf-8").read()):
-        p = g.convert(ln).split()
+        p = fix_zhe(ln, g.convert(ln).split())
         assert len(p) == len(ln), f"拼音和字数对不上：{ln} → {p}"
         chars += list(ln)
         pys += p

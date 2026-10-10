@@ -484,6 +484,10 @@ def write_readme(r: Run, source: str, lyrics, stats: dict, lang: str = "zh", oct
                 "同样的歌词前面唱过，这一遍和第一遍差一个八度 → 改成第一遍的八度（两段整体差几个半音先扣掉，比如升调）。"
                 "原唱这一遍也可能真的换了八度 —— 不对就在 SV 里改回去：", "",
                 *[f"- {x}" for x in stats["重复段八度"]], ""] if stats.get("重复段八度") else []),
+             *[y for k, why in (("原唱高一个八度，往上改", "扒出来比原唱低一个八度的音（原唱音高 pyin 量的），往上改了一个八度（只往上，不往下）："),
+                                ("音尾滑走，拆成两个音", "长音结尾滑到另一个音、稳在那里 → 从变化那一刻拆开，后一段写「-」："))
+               if (stats.get("规矩") or {}).get(k)
+               for y in (f"## {k}（要你听）", "", why, "", *[f"- {x}" for x in stats["规矩"][k]], "")],
              "听的时候：觉得哪里不对就直接在 SV 里改、存盘 —— 插件会自动备份你改的样子，下一版照你改的学。"]
     (r.P / r.round / "说明.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
