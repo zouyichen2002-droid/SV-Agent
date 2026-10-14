@@ -317,7 +317,7 @@ def main(cfg_path: str) -> int:
                 return 1
             lines = LC.clean_lines(open(cfg["lyrics"], encoding="utf-8").read())
             if aligned is not None:
-                rates = LF.line_rates(lines, *LF.fuse_ops(pys, notes0, aligned))
+                rates = LF.line_rates(lines, *LF.fuse_ops(pys, notes0, aligned, [len(ln) for ln in lines] if cfg.get("line_aware", True) else None))
             else:
                 rates = CR.line_match(lines, RL.A.align(pys, [n[3] for n in notes0], [n[1] for n in notes0]))
             keep, drop = CR.drop_unsung(lines, rates)
@@ -332,8 +332,11 @@ def main(cfg_path: str) -> int:
             print(f"和听写对不上（对上的字不到 {CR.LINE_MIN_MATCH:.0%}）、整行不放的：{len(drop)} 行 —— "
                   + "；".join(f"第 {d['行']} 行（{d['字数']} 字）" for d in rule_log["拿掉的行"]))
         if aligned is not None:
-            ops, _ = LF.fuse_ops(pys, notes0, aligned)
-            at, anch = LF.anchors(pys, aligned)
+            # 10-13：按行落位（锚点只在本行里插值、离本行太远的锚点不算）—— 每行字数照真正放进去的那些行
+            line_lens = [len(ln) for ln in LC.clean_lines(open(lyr_used, encoding="utf-8").read())]
+            line_lens = line_lens if cfg.get("line_aware", True) else None
+            ops, _ = LF.fuse_ops(pys, notes0, aligned, line_lens)
+            at, anch = LF.anchors(pys, aligned, line_lens)
             fixed, log = RL.repair(notes0, chars, pys, ops=ops, times=LF.split_times(at, anch))
         else:
             fixed, log = RL.repair(notes0, chars, pys)
@@ -408,6 +411,15 @@ def main(cfg_path: str) -> int:
         picked, rule_log["音尾滑走，拆成两个音"] = PR.split_tail(picked, trk)
         key = "音尾滑走，拆成两个音"
         print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
+
+    # 10-13《弈》：没字又轻的串（乐器漏进主唱分轨）删掉；补段里一个字都没放上的删掉（补进来的不是主唱）
+    if cfg.get("vocal_stem") and cfg.get("lyrics") and cfg.get("drop_orphans", True):
+        picked, rule_log["没字又轻的串，删"] = PR.drop_quiet_orphans(picked, PR.stem_level(cfg["vocal_stem"]))
+        info = pathlib.Path(cfg["vocal_stem"] + ".json")
+        patches = [(p["从"], p["到"]) for p in json.loads(info.read_text(encoding="utf-8")).get("用整条人声的段", [])] if info.exists() else []
+        picked, rule_log["没放上字的补段，删"] = PR.drop_lyricless_patches(picked, patches)
+        for key in ("没字又轻的串，删", "没放上字的补段，删"):
+            print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
 
     # 10-07：重复段（同样的歌词）八度照第一遍改（创作者看了只列提示的版本说「MIDI 还是和之前一样」）；吸格线前那份也跟着改
     fails_r = CR.selftest_repeat()

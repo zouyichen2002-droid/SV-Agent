@@ -16,6 +16,13 @@ pyin 整首算一次（16 kHz、10 ms 一帧），两条规矩共用。notes：[
 接进 song_round 后（10-08）十首回归：念唱和别的音不变；往上改八度另外 4 处（《夜舞》2 处和照钢琴谱改的一样）；
 音尾拆音另外 6 处，有对照的 3 处里 2 处音高对、但拆出来的后一段其实是下一个字（前面的字已经错位一格），1 处拆错 —— 不稳，先留着、看创作者听了怎么说。
 《影子小姐》（10-09）：往上改八度 1 处（和 pyin 一致，他没改回去），音尾拆音 0 处。
+
+3、4 两条是 10-13《弈》创作者改完 r01 之后加的（他「都加上」）：
+3. drop_quiet_orphans：没字的串（连着的「-」、不接在字后面）而且主唱分轨在这串上比整首唱字时的中位轻 ≥ 10 dB → 删。
+   四首他改过的（《弈》《影子小姐》《公主》《那些我恐惧至极的事》）：符合的 7 串他全删了（《弈》前奏乐器漏进来 6 串、《影子小姐》1 串），
+   他留下的 16 串都在 −5 dB 以内。
+4. drop_lyricless_patches：补段里一个字都没放上 → 这段的音删掉（《弈》1:55–2:05 补进来的不是主唱，他整段删了）。
+   别的歌有字的补段不动；《调查中（原唱）》3 段、《倒瞰清白》1 段会被删，这两首他没改过、没对照。
 """
 from __future__ import annotations
 
@@ -23,6 +30,7 @@ import numpy as np
 
 UP_MIN_VOICED, UP_TOL = 0.6, 0.8                     # 规矩 1：中段有声 ≥ 60%、和高一个八度差 ≤ 0.8 半音
 TAIL_MIN_LEN, TAIL_SEC, TAIL_JUMP, TAIL_STD, TAIL_MIN_PART = 0.4, 0.18, 1.5, 0.6, 0.15
+ORPHAN_GAP, ORPHAN_QUIET_DB = 0.3, -10.0              # 规矩 3：没字的串（前后空隙 0.3 秒）、比唱字时的中位轻 10 dB 以上
 _cache: dict[str, tuple] = {}
 fmt = lambda s: f"{int(s // 60)}:{s % 60:05.2f}"     # noqa: E731
 _N = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -110,6 +118,64 @@ def split_tail(notes: list[tuple], trk: tuple) -> tuple[list[tuple], list[str]]:
     return out, log
 
 
+def _orphan_runs(notes: list[tuple]) -> list[tuple[int, int]]:
+    """没字的串：连着的「-」（相邻空隙 < ORPHAN_GAP），而且第一个前面 ORPHAN_GAP 秒内没有音（不是接在一个字后面的拖腔）。notes 要排好序。"""
+    runs, i = [], 0
+    while i < len(notes):
+        s, d, c, ly = notes[i]
+        if ly == "-" and (i == 0 or s - (notes[i - 1][0] + notes[i - 1][1]) > ORPHAN_GAP):
+            j = i
+            while j + 1 < len(notes) and notes[j + 1][3] == "-" and notes[j + 1][0] - (notes[j][0] + notes[j][1]) < ORPHAN_GAP:
+                j += 1
+            runs.append((i, j))
+            i = j + 1
+        else:
+            i += 1
+    return runs
+
+
+def drop_quiet_orphans(notes: list[tuple], level) -> tuple[list[tuple], list[str]]:
+    """3. 没字、又比整首唱字时轻 ≥ ORPHAN_QUIET_DB 的串 → 删（乐器 / 别的声音漏进主唱分轨）。level(起, 止) → 主唱分轨这段的 dB。"""
+    notes = sorted(notes)
+    sung = [level(s, s + d) for s, d, c, ly in notes if ly not in ("-", "")]
+    if not sung:
+        return notes, []
+    ref = float(np.median(sung))
+    drop, log = set(), []
+    for i, j in _orphan_runs(notes):
+        s0, e0 = notes[i][0], notes[j][0] + notes[j][1]
+        lv = level(s0, e0) - ref
+        if lv <= ORPHAN_QUIET_DB:
+            drop.update(range(i, j + 1))
+            log.append(f"{fmt(s0)}–{fmt(e0)} {j - i + 1} 个没字的音，主唱分轨比唱字时轻 {-lv:.0f} dB → 删")
+    return [n for k, n in enumerate(notes) if k not in drop], log
+
+
+def drop_lyricless_patches(notes: list[tuple], patches: list[tuple[float, float]]) -> tuple[list[tuple], list[str]]:
+    """4. 补段（主唱分轨整段没声、用整条人声补的段）里一个字都没放上 → 这段的音删掉（补进来的不是主唱）。"""
+    drop, log = set(), []
+    for a, b in patches:
+        ins = [k for k, n in enumerate(notes) if a - 0.1 <= n[0] < b + 0.1]
+        if ins and not any(notes[k][3] not in ("-", "") for k in ins):
+            drop.update(ins)
+            log.append(f"补段 {fmt(a)}–{fmt(b)} 里 {len(ins)} 个音一个字都没放上 → 删")
+    return [n for k, n in enumerate(notes) if k not in drop], log
+
+
+def stem_level(vocal_wav: str):
+    """→ level(起, 止)：主唱分轨这段的 RMS（dB）。"""
+    if ("lv", vocal_wav) not in _cache:
+        import soundfile as sf
+        y, sr = sf.read(vocal_wav, dtype="float32", always_2d=True)
+        _cache[("lv", vocal_wav)] = (y.mean(axis=1), sr)
+    y, sr = _cache[("lv", vocal_wav)]
+
+    def level(a: float, b: float) -> float:
+        seg = y[int(a * sr):max(int(a * sr) + 1, int(b * sr))]
+        return float(20 * np.log10(np.sqrt(np.mean(seg ** 2)) + 1e-9))
+    return level
+
+
 def selftest() -> list[str]:
     """造一段音高轨：① 原唱高一个八度的音 → 往上、后面的拖音跟着；低一个八度的不往下；② 结尾滑走的拆开，开头兜一下的不拆。"""
     fails = []
@@ -134,6 +200,19 @@ def selftest() -> list[str]:
     got = [(round(n[0], 2), round(n[2]), n[3]) for n in sp if 1.9 < n[0] < 4]
     if got != [(2.0, 6700, "c"), (2.4, 6500, "-"), (3.0, 6700, "d")] or len(log) != 1:
         fails.append(f"音尾拆音不对：{got} {log}")
+    # ③ 没字的串：轻的删、响的留、接在字后面的拖腔不算串；④ 补段里没字的删、有字的留
+    lv = {0: -40.0, 1: -20.0, 2: -21.0}
+    level = lambda a, b: lv[0] if a < 2 or a >= 7.3 else lv[1] if a < 6 else lv[2]   # noqa: E731
+    ns = [(0.0, 0.5, 6000.0, "-"), (0.6, 0.5, 6200.0, "-"),                   # 前奏：轻、没字 → 删
+          (3.0, 0.4, 6400.0, "a"), (3.4, 0.4, 6400.0, "-"), (3.8, 0.3, 6200.0, "-"),   # 接在字后面的拖腔 → 不动
+          (5.0, 0.4, 6000.0, "-"), (6.5, 0.4, 6400.0, "b"),                  # 响、没字 → 不动
+          (7.8, 0.4, 6000.0, "-")]                                            # 字后面隔了 0.9 秒、轻 → 是串，删
+    kept, log = drop_quiet_orphans(ns, level)
+    if [n[0] for n in kept] != [3.0, 3.4, 3.8, 5.0, 6.5] or len(log) != 2:
+        fails.append(f"删没字的轻串不对：{[n[0] for n in kept]} {log}")
+    kept, log = drop_lyricless_patches(ns, [(0.0, 1.2), (2.9, 4.2)])
+    if [n[0] for n in kept] != [3.0, 3.4, 3.8, 5.0, 6.5, 7.8] or len(log) != 1:
+        fails.append(f"删没字的补段不对：{[n[0] for n in kept]} {log}")
     return fails
 
 

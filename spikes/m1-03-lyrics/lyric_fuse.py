@@ -46,19 +46,45 @@ def _lcs(a: list[str], b: list[str]) -> list[tuple[int, int]]:
     return out
 
 
-def anchors(pys: list[str], aligned: list[tuple]) -> tuple[list[float | None], list[bool]]:
-    """→ (每个字的时间, 是不是锚点)。没有一个锚点时全是 None。"""
+OUTLIER_MIN, OUTLIER_PER_CHAR = 4.0, 0.6   # 锚点离本行其他锚点的中位超过 max(4, 0.6×字数 + 2) 秒 → 不算锚点
+CROSS_LINE_GAP = 3.0                       # 前后锚点跨行、隔得比这远 → 不跨行插值
+
+
+def anchors(pys: list[str], aligned: list[tuple], line_lens: list[int] | None = None) -> tuple[list[float | None], list[bool]]:
+    """→ (每个字的时间, 是不是锚点)。没有一个锚点时全是 None。
+
+    给了 line_lens（每行字数）就按行（10-13《刽子手》：强制对齐把第 12 行的「我」对到了下一行的「我」上（8 秒后），
+    「走」没对上、在两行之间按字数插值插到了 4 秒后 —— 都放错了）：
+    · 离本行其他锚点太远的锚点不算；· 前后锚点跨行、又隔了 3 秒以上时，不跨这个空插值，按 INTERP_STEP 在本行里往外推。"""
     al = [(n[0], n[3]) for n in aligned if n[3] not in ("-", "", "SP", "AP", "+")]
     t: list[float | None] = [None] * len(pys)
     anch = [False] * len(pys)
     for i, j in _lcs(pys, [c for _, c in al]):
         t[i], anch[i] = al[j][0], True
+    owner = [li for li, n in enumerate(line_lens) for _ in range(n)] if line_lens and sum(line_lens) == len(pys) else None
+    if owner is not None:
+        for li, n in enumerate(line_lens):
+            ks = [k for k in range(len(pys)) if owner[k] == li and anch[k]]
+            if len(ks) < 3:
+                continue
+            med = sorted(t[k] for k in ks)[len(ks) // 2]
+            lim = max(OUTLIER_MIN, OUTLIER_PER_CHAR * n + 2.0)
+            for k in ks:
+                if abs(t[k] - med) > lim:
+                    t[k], anch[k] = None, False
     idx = [i for i in range(len(pys)) if anch[i]]
     for i in range(len(pys)):
         if anch[i] or not idx:
             continue
         lo = max((k for k in idx if k < i), default=None)
         hi = min((k for k in idx if k > i), default=None)
+        # 前后两个锚点不在同一行、而且隔得远（> CROSS_LINE_GAP 秒）：不跨这个空插值，在本行里往外推
+        # （只在这种时候改：一律按行插值的话《公主》2:08 那句会错一格，对他改的 440 → 435）
+        if owner is not None and lo is not None and hi is not None and owner[lo] != owner[hi] and t[hi] - t[lo] > CROSS_LINE_GAP:
+            if owner[lo] == owner[i]:
+                hi = None
+            elif owner[hi] == owner[i]:
+                lo = None
         if lo is not None and hi is not None:
             t[i] = t[lo] + (t[hi] - t[lo]) * (i - lo) / (hi - lo)
         elif lo is not None:
@@ -85,9 +111,9 @@ def split_times(t: list, anch: list[bool]) -> list:
     return out
 
 
-def fuse_ops(pys: list[str], notes: list[tuple], aligned: list[tuple]) -> tuple[list[tuple], list[bool]]:
+def fuse_ops(pys: list[str], notes: list[tuple], aligned: list[tuple], line_lens: list[int] | None = None) -> tuple[list[tuple], list[bool]]:
     """→ (ops，和 lyric_align.align 一样：(i 歌词, j 音, 类别)，按顺序；每个字是不是锚点)。"""
-    t, anch = anchors(pys, aligned)
+    t, anch = anchors(pys, aligned, line_lens)
     m, n = len(pys), len(notes)
     INF = float("inf")
     D = [[INF] * (n + 1) for _ in range(m + 1)]
@@ -156,6 +182,22 @@ def selftest() -> list[str]:
     placed = {i for i, j, _ in ops if i is not None and j is not None}
     if placed & {8, 9, 10}:
         fails.append(f"没唱的字被塞到音上：{sorted(placed & {8, 9, 10})}")
+    # 10-13《刽子手》① 行尾的字强制对齐漏了、下一行在 9 秒后：只在本行往后推，不跨行插值（原来插到 5 秒处、放不上）
+    pys2 = ["a", "b", "c", "d", "e"]
+    notes2 = [(0.0, 0.4, 6000.0, "a"), (0.5, 0.4, 6000.0, "b"), (1.3, 0.4, 6000.0, "c"), (10.0, 0.4, 6000.0, "d"), (10.5, 0.4, 6000.0, "e")]
+    al2 = [(0.0, 0.4, 6000.0, "a"), (0.5, 0.4, 6000.0, "b"), (10.0, 0.4, 6000.0, "d"), (10.5, 0.4, 6000.0, "e")]
+    ops, _ = fuse_ops(pys2, notes2, al2, [3, 2])
+    got = {j: i for i, j, _ in ops if i is not None and j is not None}
+    if got != {k: k for k in range(5)}:
+        fails.append(f"行尾漏锚：该一字一音，实际 {got}")
+    # ② 本行最后一个字被对到了下一行同音的字上（8 秒后）：离本行太远的锚点不算，两个字各回各的音
+    pys3 = ["a", "b", "c", "d", "x", "x", "y", "z"]
+    notes3 = [(k * 0.3, 0.25, 6000.0, ly) for k, ly in enumerate(["a", "b", "c", "d", "w"])] + [(9.0 + k * 0.3, 0.25, 6000.0, ly) for k, ly in enumerate(["x", "y", "z"])]
+    al3 = [(k * 0.3, 0.25, 6000.0, ly) for k, ly in enumerate(["a", "b", "c", "d"])] + [(9.0 + k * 0.3, 0.25, 6000.0, ly) for k, ly in enumerate(["x", "y", "z"])]
+    ops, anch3 = fuse_ops(pys3, notes3, al3, [5, 3])
+    got = {j: i for i, j, _ in ops if i is not None and j is not None}
+    if got != {k: k for k in range(8)}:
+        fails.append(f"锚点对到下一行：该一字一音，实际 {got}（锚点 {anch3}）")
     return fails
 
 
