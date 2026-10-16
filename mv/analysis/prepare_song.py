@@ -85,6 +85,8 @@ def beat_grid(tm: dict, duration: float) -> tuple[float, list[float], list[float
     beats: list[float] = []
     downs: list[float] = []
     bpm = 0.0
+    n, d = (tm.get("map") or {}).get("meter", [4, 4])               # 拍号（10-15《我奉陪》6/8）：一小节几个四分音符
+    per_bar = round(int(n) * 4 / int(d))
     for s in tm["sections"]:
         bpm = float(s["bpm"])
         per = 60.0 / bpm
@@ -97,7 +99,7 @@ def beat_grid(tm: dict, duration: float) -> tuple[float, list[float], list[float
                 break
             if t >= 0:
                 beats.append(round(t, 4))
-                if k % 4 == 0:
+                if k % per_bar == 0:
                     downs.append(round(t, 4))
             k += 1
     return round(bpm, 3), beats, downs
@@ -243,7 +245,7 @@ def main() -> int:
     }
     tm = json.loads(tm_path.read_text(encoding="utf-8"))
     bpm, beats, downs = beat_grid(tm, duration)
-    bar_s = 240.0 / bpm if bpm else 2.0
+    bar_s = float(np.median(np.diff(downs))) if len(downs) > 1 else (240.0 / bpm if bpm else 2.0)   # 按强拍间隔（拍号不一定是 4/4）
     secs = sections(lines, downs, duration, bar_s)
     audio = {"duration": duration, "bpm": bpm, "fps": FPS, "beats": beats, "downbeats": downs, "sections": secs,
              "features": feats, "onsets": ons}

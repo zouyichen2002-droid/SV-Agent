@@ -130,7 +130,8 @@ def main(cfg_path: str) -> int:
     for i, t in enumerate(tracks):
         t["dispOrder"] = i
     d = {"version": base["version"], "uuid": str(uuid.uuid4()),
-         "time": {"meter": [{"index": 0, "numerator": 4, "denominator": 4}], "tempo": tempo, "startTimeSeconds": 0.0},
+         "time": {"meter": [{"index": 0, "numerator": int(tm.get("meter", [4, 4])[0]), "denominator": int(tm.get("meter", [4, 4])[1])}],
+                  "tempo": tempo, "startTimeSeconds": 0.0},
          "library": [], "tracks": tracks,
          "renderConfig": {**copy.deepcopy(base["renderConfig"]), "destination": "", "filename": "未命名"},
          "projectMixer": copy.deepcopy(base.get("projectMixer", {}))}

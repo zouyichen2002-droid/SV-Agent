@@ -151,9 +151,16 @@ def blicks_of(r: dict, tempo: list[dict]) -> tuple[int, int]:
     return a, max(1, round(RT.seconds_to_blick(r["q_off_s"], tempo)) - a)
 
 
-def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_svp: pathlib.Path, scale: dict | None = None) -> dict:
+def meter_of(tm: dict) -> list[dict]:
+    """拍号：速度表里写了 meter（[分子, 分母]）就用它，没写就是 4/4。10-15《我奉陪》是 6/8（伴奏三个八分一组、六个八分换一次和弦）。"""
+    n, dd = tm.get("meter", [4, 4])
+    return [{"index": 0, "numerator": int(n), "denominator": int(dd)}]
+
+
+def build(cfg: dict, tempo: list[dict], rows: list[dict], track_name: str, out_svp: pathlib.Path, scale: dict | None = None,
+          meter: list[dict] | None = None) -> dict:
     d0 = C.load_svp(cfg["template"])
-    d = RT.retime(d0, {"meter": [{"index": 0, "numerator": 4, "denominator": 4}], "tempo": tempo})
+    d = RT.retime(d0, {"meter": meter or meter_of({}), "tempo": tempo})
     tmpl = next(t for t in d["tracks"] if t.get("name") == cfg["vocal_template_track"])
     acc_in_tmpl = pathlib.Path(cfg.get("template_accomp") or cfg["accomp"]).name   # 模板里原来那条伴奏的文件名
     for t in d["tracks"]:
@@ -387,14 +394,20 @@ def main(cfg_path: str) -> int:
         print("原唱音高规矩的自检不过：", fails_p)
         return 1
     trk = PR.track(cfg["vocal_stem"]) if cfg.get("vocal_stem") else None
+    acc_h = None                                                 # 伴奏的音级分布（测调式用；算一次）
     if trk is not None and cfg.get("octave_up", True):
         picked, rule_log["原唱高一个八度，往上改"] = PR.octave_up(picked, trk)
         key = "原唱高一个八度，往上改"
         print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
     if cfg.get("rules_0930"):                                    # 09-30 新规矩 2、3：同音高的接续（长音截两段写韵母）、念唱拉平
         if int(cfg["rules_0930"]) >= 2 and kept_lens:            # 新规矩 4（09-30 晚）：下一句的第一个字跑到上一句末尾
+            # 10-15《我奉陪》：补的音照原唱（取调内最近的音；调式这时先拿当时的旋律 + 伴奏测一次），量不出来才照下一个音
+            fill_pitch = None
+            if trk is not None and cfg.get("fill_from_sung", True):
+                acc_h = acc_h if acc_h is not None else KS.accomp_hist(cfg["accomp"])
+                fill_pitch = PR.sung_pitch(trk, KS.detect([KS.melody_hist(picked), acc_h]))
             picked, rule_log["下一句的第一个字跑到上一句末尾"], rule_log["要你手放的字"] = CR.fix_line_starts(
-                picked, kept_lens, pys, lambda s: 60.0 / bpm_at(tempo, s))
+                picked, kept_lens, pys, lambda s: 60.0 / bpm_at(tempo, s), pitch_of=fill_pitch)
             key = "下一句的第一个字跑到上一句末尾"
             print(f"{key}：{len(rule_log[key])} 处" + "".join(f"\n    {x}" for x in rule_log[key]))
         picked, rule_log["同音高的接续"] = CR.same_pitch(picked)
@@ -448,12 +461,12 @@ def main(cfg_path: str) -> int:
     if fails_k:
         print("调式 / 重复段提示的自检不过：", fails_k)
         return 1
-    scale = KS.detect([KS.melody_hist(picked), KS.accomp_hist(cfg["accomp"])])
+    scale = KS.detect([KS.melody_hist(picked), acc_h if acc_h is not None else KS.accomp_hist(cfg["accomp"])])
     print(f"调式音阶：{scale['说明']}（旋律 + 伴奏一起测，得分 {scale['得分']}）")
     rnd_dir.mkdir(parents=True, exist_ok=True)
     name_q, name_raw = f"扒谱 {cfg['round']}（第一版 · 吸格线）", f"扒谱 {cfg['round']}（吸格线前）"
     for path, rr, nm in ((out_svp, rows, name_q), (before_svp, raw_rows, name_raw)):
-        path.write_text(json.dumps(build(cfg, tempo, rr, nm, path, scale), ensure_ascii=False), encoding="utf-8")
+        path.write_text(json.dumps(build(cfg, tempo, rr, nm, path, scale, meter_of(tm)), ensure_ascii=False), encoding="utf-8")
         f = check(path, cfg, tempo, rr, nm)
         print(f"写出 {path}\n  自检（读回来）：", "通过" if not f else "不通过")
         for x in f:

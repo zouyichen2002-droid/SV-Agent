@@ -176,6 +176,31 @@ def stem_level(vocal_wav: str):
     return level
 
 
+SCALE_PCS = {"Major": (0, 2, 4, 5, 7, 9, 11), "NaturalMinor": (0, 2, 3, 5, 7, 8, 10), "HarmonicMinor": (0, 2, 3, 5, 7, 8, 11)}
+_ROOTS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def sung_pitch(trk: tuple, scale: dict | None):
+    """→ pitch_of(起, 止)：原唱在这段中间（15%–85%）唱的音高中位，取调内最近的音（音分）；有声不到 60% 或不到 3 帧 → None。
+    补「下一句的第一个字」那个音用（5. 补的音照原唱，10-15《我奉陪》创作者「都加上」）。scale 是 key_scale.detect 的结果，没有就取最近的半音。"""
+    T, mid, ok = trk
+    pcs = None
+    if scale and scale.get("type") in SCALE_PCS and scale.get("root") in _ROOTS:
+        r = _ROOTS.index(scale["root"])
+        pcs = {(r + x) % 12 for x in SCALE_PCS[scale["type"]]}
+
+    def pitch_of(a: float, b: float) -> float | None:
+        d = b - a
+        m = (T >= a + 0.15 * d) & (T <= a + 0.85 * d)
+        v = mid[m & ok]
+        if len(v) < 3 or len(v) / max(1, m.sum()) < UP_MIN_VOICED:
+            return None
+        x = float(np.median(v))
+        cands = [q for q in range(int(x) - 2, int(x) + 3) if pcs is None or q % 12 in pcs]
+        return float(min(cands, key=lambda q: abs(q - x)) * 100)
+    return pitch_of
+
+
 def selftest() -> list[str]:
     """造一段音高轨：① 原唱高一个八度的音 → 往上、后面的拖音跟着；低一个八度的不往下；② 结尾滑走的拆开，开头兜一下的不拆。"""
     fails = []
@@ -213,6 +238,19 @@ def selftest() -> list[str]:
     kept, log = drop_lyricless_patches(ns, [(0.0, 1.2), (2.9, 4.2)])
     if [n[0] for n in kept] != [3.0, 3.4, 3.8, 5.0, 6.5, 7.8] or len(log) != 1:
         fails.append(f"删没字的补段不对：{[n[0] for n in kept]} {log}")
+    # ⑤ 补的音照原唱：从 E4 兜到 G4（中位 66.5）在 C 和声小调里取 G4；没声 → None；没给调式 → 最近的半音
+    T2 = np.arange(0, 2, 0.01)
+    m2 = np.where(T2 < 0.1, 64.0, np.where(T2 < 0.3, 66.5, 67.0))
+    m2[T2 >= 1.0] = np.nan
+    trk2 = (T2, m2, ~np.isnan(m2))
+    po = sung_pitch(trk2, {"type": "HarmonicMinor", "root": "C"})
+    if po(0.0, 0.29) != 6700.0 or po(1.2, 1.5) is not None:
+        fails.append(f"补的音照原唱不对：{po(0.0, 0.29)} {po(1.2, 1.5)}")
+    m3 = np.full(len(T2), 66.2)
+    if sung_pitch((T2, m3, np.ones(len(T2), bool)), None)(0.0, 0.5) != 6600.0:
+        fails.append("没给调式时 66.2 该取最近的半音 F#4")
+    if sung_pitch(trk2, {"type": "Major", "root": "C"})(0.12, 0.28) != 6700.0:
+        fails.append("C 大调里 66.5 该取 G4")
     return fails
 
 

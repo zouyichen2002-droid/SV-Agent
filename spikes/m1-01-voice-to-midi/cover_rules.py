@@ -277,9 +277,12 @@ def map_chars(notes: list[tuple], pys: list[str]) -> dict[int, int]:
     return out
 
 
-def fix_line_starts(notes: list[tuple], line_lens: list[int], pys: list[str], beat_sec=lambda s: 0.5
+def fix_line_starts(notes: list[tuple], line_lens: list[int], pys: list[str], beat_sec=lambda s: 0.5, pitch_of=None
                     ) -> tuple[list[tuple], list[str], list[str]]:
-    """→ (新的音, 改了什么, 要你听 / 手放的)。line_lens：放进主唱的每行字数（和 pys 同序）；beat_sec(秒) → 那一刻一拍多少秒。"""
+    """→ (新的音, 改了什么, 要你听 / 手放的)。line_lens：放进主唱的每行字数（和 pys 同序）；beat_sec(秒) → 那一刻一拍多少秒。
+    pitch_of(起, 止) → 补的音用的音分（原唱在那里唱的，取调内最近的音），量不出来给 None → 照下一个音（10-15 创作者「都加上」：
+    《我奉陪》3 处补的「jin」照下一个音写成 C4，原唱是从 E4 兜到 G4，创作者改了 2 处成 G4；《公主》《那些我恐惧至极的事》各 1 处没改 ——
+    一处原唱量不出音高，一处原唱就是下一个音）。"""
     notes = [list(n) for n in sorted(notes)]
     note_of = {c: k for k, c in map_chars([tuple(n) for n in notes], pys).items()}
     gap = lambda a, b: notes[b][0] - (notes[a][0] + notes[a][1])                    # noqa: E731
@@ -309,15 +312,18 @@ def fix_line_starts(notes: list[tuple], line_lens: list[int], pys: list[str], be
         dur = bt if room >= bt else (bt / 2 if room >= bt / 2 else None)
         head = f"{fmt(notes[jb][0])}「{moved}」是下一句的第一个字，跑到了上一句末尾 → 那个音还给「{prev}」写「{notes[jb][3]}」；"
         if dur is not None and k1 == jn:
-            splits.append((k1, moved, dur))
-            log.append(head + f"「{moved}」在 {fmt(notes[k1][0] - dur)} 补一个音（{'一拍' if dur == bt else '半拍'}、音高照下一个音）")
-            hand.append(f"{fmt(notes[k1][0] - dur)}「{moved}」是补的音，音高照下一个音写的，要你听")
+            st = notes[k1][0]
+            c_sung = pitch_of(st - dur, st) if pitch_of else None
+            how = "音高照原唱" if c_sung is not None else "音高照下一个音"
+            splits.append((k1, moved, dur, c_sung))
+            log.append(head + f"「{moved}」在 {fmt(st - dur)} 补一个音（{'一拍' if dur == bt else '半拍'}、{how}）")
+            hand.append(f"{fmt(st - dur)}「{moved}」是补的音，{how}写的，要你听")
         else:
             log.append(head + f"「{moved}」不放（空档不够补一个音）")
             hand.append(f"{fmt(notes[k1][0])} 前面：下一句的第一个字「{moved}」没放（空档不够），要你手放")
-    for k1, ly, dur in sorted(splits, reverse=True):
+    for k1, ly, dur, c_sung in sorted(splits, reverse=True):
         st, d, c, _ = notes[k1]
-        notes.insert(k1, [st - dur, dur, c, ly])
+        notes.insert(k1, [st - dur, dur, c if c_sung is None else c_sung, ly])
     return [tuple(n) for n in notes], log, hand
 
 
@@ -395,6 +401,12 @@ def selftest() -> list[str]:
     if ([g[3] for g in got] != ["da", "di", "i", "pa", "qi", "ri"] or abs(got[3][0] - (2.2 - 0.4615)) > 1e-9
             or got[3][2] != 6400.0 or got[4] != (2.2, 0.8, 6400.0, "qi") or len(hand) != 1):
         fails.append(f"句首的字跑到上一句末尾没改对（该在空档里补一拍、下一个音不动）：{got}")
+    got, _, hand = fix_line_starts(base, [2, 3], ["da", "di", "pa", "qi", "ri"], beat, pitch_of=lambda a, b: 6700.0)
+    if got[3][2] != 6700.0 or got[4][2] != 6400.0 or "照原唱" not in hand[0]:
+        fails.append(f"原唱量得出音高时，补的音该照原唱（下一个音不动）：{got[3:5]} {hand}")
+    got, _, hand = fix_line_starts(base, [2, 3], ["da", "di", "pa", "qi", "ri"], beat, pitch_of=lambda a, b: None)
+    if got[3][2] != 6400.0 or "照下一个音" not in hand[0]:
+        fails.append(f"原唱量不出音高时，补的音该照下一个音：{got[3]} {hand}")
     tight = base[:3] + [(1.6, 0.8, 6400.0, "qi"), (2.4, 0.4, 6500.0, "ri")]       # 空档 0.4 秒：只够补半拍
     got, _, _ = fix_line_starts(tight, [2, 3], ["da", "di", "pa", "qi", "ri"], beat)
     if [g[3] for g in got] != ["da", "di", "i", "pa", "qi", "ri"] or abs(got[3][1] - 0.4615 / 2) > 1e-9:
